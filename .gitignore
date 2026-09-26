@@ -13,3 +13,18 @@ DerivedData/
 
 # macOS
 .DS_Store
+
+# Signing material, keys, and secrets — never commit
+*.p12
+*.pfx
+*.pem
+*.key
+*.cer
+*.crt
+*.certSigningRequest
+*.mobileprovision
+*.provisionprofile
+*.keychain
+*.keychain-db
+.env
+.env.*
