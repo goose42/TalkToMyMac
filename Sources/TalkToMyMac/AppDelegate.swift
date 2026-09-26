@@ -35,9 +35,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, Record
     private let shortcuts = ShortcutManager()
     private var settingsController: SettingsWindowController!
     private let transcriptionStore = TranscriptionStore()
-    private var transcriptionsMenuItem: NSMenuItem!
     private var floatingIndicator: FloatingIndicatorController!
-    private var floatingIndicatorMenuItem: NSMenuItem!
 
     // MARK: NSApplicationDelegate
 
@@ -53,12 +51,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, Record
 
         formatter = FoundationModelFormatter(settings: formattingSettings)
         pasteDelivery = PasteDelivery(settings: formattingSettings)
+
+        // Always-on-top dot that becomes a live waveform while recording.
+        floatingIndicator = FloatingIndicatorController()
+        let indicatorModel = floatingIndicator.model
+        audioCapture.onLevels = { levels in
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { indicatorModel.push(levels) }
+            }
+        }
+
         settingsController = SettingsWindowController(
             speechService: speechService,
             formatter: formatter,
             settings: formattingSettings,
             shortcuts: shortcuts,
-            transcriptionStore: transcriptionStore
+            transcriptionStore: transcriptionStore,
+            floatingIndicator: floatingIndicator
         )
 
         // Build the RecorderController: mic → Speech (on-device) → Foundation Models → paste.
@@ -79,15 +88,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, Record
             } else {
                 // SF Symbol unavailable — use a text fallback so the item is visible.
                 button.title = "🎤"
-            }
-        }
-
-        // Always-on-top dot that becomes a live waveform while recording.
-        floatingIndicator = FloatingIndicatorController()
-        let indicatorModel = floatingIndicator.model
-        audioCapture.onLevels = { levels in
-            DispatchQueue.main.async {
-                MainActor.assumeIsolated { indicatorModel.push(levels) }
             }
         }
 
@@ -195,7 +195,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, Record
         alert.messageText = "Can't Paste at Cursor"
         alert.informativeText = """
             TalkToMyMac needs Accessibility access to paste text into other apps. \
-            Your transcript was saved and is available under "Transcriptions" in the menu.
+            Your transcript was saved and is available in Settings → Transcriptions.
 
             Enable TalkToMyMac in System Settings → Privacy & Security → Accessibility, \
             then relaunch the app.
@@ -251,27 +251,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, Record
 
         menu.addItem(NSMenuItem.separator())
 
-        transcriptionsMenuItem = NSMenuItem(title: "Transcriptions", action: nil, keyEquivalent: "")
-        let transcriptionsSubmenu = NSMenu()
-        transcriptionsMenuItem.submenu = transcriptionsSubmenu
-        menu.addItem(transcriptionsMenuItem)
-        refreshTranscriptionsMenu()
-
-        menu.addItem(NSMenuItem.separator())
-
-        floatingIndicatorMenuItem = NSMenuItem(
-            title: "Show Floating Indicator",
-            action: #selector(toggleFloatingIndicator),
-            keyEquivalent: ""
-        )
-        floatingIndicatorMenuItem.target = self
-        floatingIndicatorMenuItem.state = floatingIndicator.isVisible ? .on : .off
-        menu.addItem(floatingIndicatorMenuItem)
-
-        let recordingsItem = NSMenuItem(title: "Show Recordings…", action: #selector(openRecordingsFolder), keyEquivalent: "")
-        recordingsItem.target = self
-        menu.addItem(recordingsItem)
-
         let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
         settingsItem.target = self
         menu.addItem(settingsItem)
@@ -285,11 +264,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, Record
     /// Shortcuts can change in Settings at any time, so refresh their labels on open.
     func menuWillOpen(_ menu: NSMenu) {
         refreshShortcutItems()
-    }
-
-    @objc private func toggleFloatingIndicator() {
-        floatingIndicator.isVisible.toggle()
-        floatingIndicatorMenuItem.state = floatingIndicator.isVisible ? .on : .off
     }
 
     @objc private func toggleRecording() {
@@ -354,51 +328,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, Record
             if let result = await self.controller.processRecording(samples: rawSamples, sampleRate: sampleRate) {
                 print("[Pipeline] Transcript: \(result.finalText)")
                 self.transcriptionStore.insert(result, audioSeconds: duration)
-                self.refreshTranscriptionsMenu()
             } else {
                 print("[Pipeline] Transcription returned nil (model not ready or empty result)")
             }
         }
-    }
-
-    // MARK: Transcriptions menu
-
-    private func refreshTranscriptionsMenu() {
-        guard let submenu = transcriptionsMenuItem?.submenu else { return }
-        submenu.removeAllItems()
-
-        let records = transcriptionStore.recentTranscriptions(limit: 10)
-        if records.isEmpty {
-            let empty = NSMenuItem(title: "No transcriptions yet", action: nil, keyEquivalent: "")
-            empty.isEnabled = false
-            submenu.addItem(empty)
-            return
-        }
-
-        let formatter = DateFormatter()
-        formatter.dateStyle = .short
-        formatter.timeStyle = .short
-
-        for record in records {
-            // Truncate long transcriptions for the menu title
-            let preview = record.text.count > 60
-                ? String(record.text.prefix(57)) + "…"
-                : record.text
-            let title = "[\(formatter.string(from: record.timestamp))] \(preview)"
-
-            let item = NSMenuItem(title: title, action: #selector(copyTranscription(_:)), keyEquivalent: "")
-            item.target = self
-            item.representedObject = record.text
-            item.toolTip = record.text
-            submenu.addItem(item)
-        }
-    }
-
-    @objc private func copyTranscription(_ sender: NSMenuItem) {
-        guard let text = sender.representedObject as? String else { return }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
-        print("[AppDelegate] Copied transcription to clipboard")
     }
 
     // MARK: RecordingIndicator
@@ -473,12 +406,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, Record
 
     @objc private func openSettings() {
         settingsController.showWindow()
-    }
-
-    @objc private func openRecordingsFolder() {
-        let recordingsDir = AudioCapture.recordingsDirectory
-        try? FileManager.default.createDirectory(at: recordingsDir, withIntermediateDirectories: true)
-        NSWorkspace.shared.open(recordingsDir)
     }
 
     // MARK: Helpers

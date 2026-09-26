@@ -13,14 +13,17 @@ final class SettingsWindowController {
     private let settings: FormattingSettings
     private let shortcuts: ShortcutManager
     private let transcriptionStore: TranscriptionStore
+    private let floatingIndicator: FloatingIndicatorController
 
     init(speechService: SpeechTranscriptionService, formatter: FoundationModelFormatter,
-         settings: FormattingSettings, shortcuts: ShortcutManager, transcriptionStore: TranscriptionStore) {
+         settings: FormattingSettings, shortcuts: ShortcutManager, transcriptionStore: TranscriptionStore,
+         floatingIndicator: FloatingIndicatorController) {
         self.speechService = speechService
         self.formatter = formatter
         self.settings = settings
         self.shortcuts = shortcuts
         self.transcriptionStore = transcriptionStore
+        self.floatingIndicator = floatingIndicator
     }
 
     func showWindow() {
@@ -40,7 +43,12 @@ final class SettingsWindowController {
             "General",
             symbol: "gearshape",
             SettingsView(speechService: speechService, formatter: formatter, settings: settings,
-                         shortcuts: shortcuts)
+                         shortcuts: shortcuts, floatingIndicator: floatingIndicator)
+        ))
+        tabs.addTabViewItem(Self.tab(
+            "Transcriptions",
+            symbol: "text.bubble",
+            TranscriptionsView(store: transcriptionStore)
         ))
         tabs.addTabViewItem(Self.tab(
             "Instrumentation",
@@ -83,8 +91,23 @@ private struct SettingsView: View {
     let formatter: FoundationModelFormatter
     @Bindable var settings: FormattingSettings
     let shortcuts: ShortcutManager
+    let floatingIndicator: FloatingIndicatorController
 
     @State private var accessibilityTrusted = PasteDelivery.isAccessibilityTrusted
+    /// Mirrors `floatingIndicator.isVisible`, which isn't observable; Settings is the only
+    /// place it changes.
+    @State private var showFloatingIndicator: Bool
+
+    init(speechService: SpeechTranscriptionService, formatter: FoundationModelFormatter,
+         settings: FormattingSettings, shortcuts: ShortcutManager,
+         floatingIndicator: FloatingIndicatorController) {
+        self.speechService = speechService
+        self.formatter = formatter
+        self.settings = settings
+        self.shortcuts = shortcuts
+        self.floatingIndicator = floatingIndicator
+        _showFloatingIndicator = State(initialValue: floatingIndicator.isVisible)
+    }
 
     var body: some View {
         Form {
@@ -115,6 +138,20 @@ private struct SettingsView: View {
                      + "macOS can't detect clashes with other apps' shortcuts — if one doesn't "
                      + "respond, another app or a system shortcut (e.g. Spotlight, input "
                      + "source switching) probably has it; pick a different combination.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
+                Toggle("Show floating recording indicator", isOn: $showFloatingIndicator)
+                    .onChange(of: showFloatingIndicator) { _, visible in
+                        floatingIndicator.isVisible = visible
+                    }
+            } header: {
+                Text("Recording Indicator")
+            } footer: {
+                Text("A small dot that stays above all windows and expands into a live waveform "
+                     + "while recording. Drag it to move it anywhere on screen.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -153,6 +190,16 @@ private struct SettingsView: View {
             Section("Delivery") {
                 Toggle("Paste at cursor after dictation", isOn: $settings.autoPasteEnabled)
                 accessibilityStatusView
+            }
+
+            Section("Recordings") {
+                LabeledContent("Audio files") {
+                    Button("Show in Finder") {
+                        let dir = AudioCapture.recordingsDirectory
+                        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                        NSWorkspace.shared.open(dir)
+                    }
+                }
             }
         }
         .padding(20)
