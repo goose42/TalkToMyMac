@@ -38,7 +38,10 @@ endif
 setup-signing:
 	@bash scripts/setup-signing.sh
 
+# `open` only re-activates an already-running instance, which would silently keep the old
+# binary alive — quit it first so the fresh build is what actually launches.
 run: build
+	-@pkill -x TalkToMyMac && sleep 0.5 || true
 	open $(APP_BUNDLE)
 
 test:

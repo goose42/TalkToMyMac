@@ -122,9 +122,11 @@ public class RecorderController: @unchecked Sendable {
     }
 
     /// Process recorded audio through the pipeline: denoise → transcribe → format → deliver.
-    /// Returns the final transcript, or nil if any required step fails.
+    /// Returns the raw and final text plus step timings, or nil if any required step fails.
     @discardableResult
-    public func processRecording(samples: [Float], sampleRate: Double) async -> String? {
+    public func processRecording(samples: [Float], sampleRate: Double) async -> PipelineResult? {
+        let clock = ContinuousClock()
+
         // 1. Denoise (optional)
         let processedSamples = denoiser?.denoise(samples: samples) ?? samples
 
@@ -133,16 +135,31 @@ public class RecorderController: @unchecked Sendable {
         indicator.setProcessing(true)
         defer { indicator.setProcessing(false) }
 
+        let transcribeStart = clock.now
         guard let rawText = await transcriber.transcribe(samples: processedSamples, sampleRate: sampleRate) else { return nil }
+        let transcriptionDuration = clock.now - transcribeStart
 
         // 3. Format (optional — falls back to raw text on any failure)
-        let finalText = await formatter?.format(raw: rawText) ?? rawText
+        var formattedText: String?
+        var formattingDuration: Duration?
+        if let formatter {
+            let formatStart = clock.now
+            formattedText = await formatter.format(raw: rawText)
+            formattingDuration = clock.now - formatStart
+        }
+        let finalText = formattedText ?? rawText
 
         // 4. Deliver (optional — failure is non-fatal)
         if let sink = outputSink {
             try? sink.deliver(text: finalText)
         }
 
-        return finalText
+        return PipelineResult(
+            rawText: rawText,
+            finalText: finalText,
+            llmApplied: formattedText != nil,
+            transcriptionDuration: transcriptionDuration,
+            formattingDuration: formattingDuration
+        )
     }
 }

@@ -36,6 +36,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, Record
     private var settingsController: SettingsWindowController!
     private let transcriptionStore = TranscriptionStore()
     private var transcriptionsMenuItem: NSMenuItem!
+    private var floatingIndicator: FloatingIndicatorController!
+    private var floatingIndicatorMenuItem: NSMenuItem!
 
     // MARK: NSApplicationDelegate
 
@@ -55,7 +57,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, Record
             speechService: speechService,
             formatter: formatter,
             settings: formattingSettings,
-            shortcuts: shortcuts
+            shortcuts: shortcuts,
+            transcriptionStore: transcriptionStore
         )
 
         // Build the RecorderController: mic → Speech (on-device) → Foundation Models → paste.
@@ -76,6 +79,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, Record
             } else {
                 // SF Symbol unavailable — use a text fallback so the item is visible.
                 button.title = "🎤"
+            }
+        }
+
+        // Always-on-top dot that becomes a live waveform while recording.
+        floatingIndicator = FloatingIndicatorController()
+        let indicatorModel = floatingIndicator.model
+        audioCapture.onLevels = { levels in
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { indicatorModel.push(levels) }
             }
         }
 
@@ -247,6 +259,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, Record
 
         menu.addItem(NSMenuItem.separator())
 
+        floatingIndicatorMenuItem = NSMenuItem(
+            title: "Show Floating Indicator",
+            action: #selector(toggleFloatingIndicator),
+            keyEquivalent: ""
+        )
+        floatingIndicatorMenuItem.target = self
+        floatingIndicatorMenuItem.state = floatingIndicator.isVisible ? .on : .off
+        menu.addItem(floatingIndicatorMenuItem)
+
         let recordingsItem = NSMenuItem(title: "Show Recordings…", action: #selector(openRecordingsFolder), keyEquivalent: "")
         recordingsItem.target = self
         menu.addItem(recordingsItem)
@@ -264,6 +285,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, Record
     /// Shortcuts can change in Settings at any time, so refresh their labels on open.
     func menuWillOpen(_ menu: NSMenu) {
         refreshShortcutItems()
+    }
+
+    @objc private func toggleFloatingIndicator() {
+        floatingIndicator.isVisible.toggle()
+        floatingIndicatorMenuItem.state = floatingIndicator.isVisible ? .on : .off
     }
 
     @objc private func toggleRecording() {
@@ -325,9 +351,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, Record
 
         Task { [weak self] in
             guard let self else { return }
-            if let text = await self.controller.processRecording(samples: rawSamples, sampleRate: sampleRate) {
-                print("[Pipeline] Transcript: \(text)")
-                self.transcriptionStore.insert(text: text)
+            if let result = await self.controller.processRecording(samples: rawSamples, sampleRate: sampleRate) {
+                print("[Pipeline] Transcript: \(result.finalText)")
+                self.transcriptionStore.insert(result, audioSeconds: duration)
                 self.refreshTranscriptionsMenu()
             } else {
                 print("[Pipeline] Transcription returned nil (model not ready or empty result)")
@@ -385,6 +411,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, Record
 
     nonisolated func setRecording(_ recording: Bool) {
         DispatchQueue.main.async { [weak self] in
+            if let indicator = self?.floatingIndicator {
+                if recording {
+                    indicator.moveToActiveScreen()
+                    indicator.model.resetLevels()
+                }
+                indicator.model.phase = recording ? .recording : .idle
+            }
             guard let button = self?.statusItem.button else { return }
             if recording {
                 let img = NSImage(systemSymbolName: "mic.fill", accessibilityDescription: "Recording")
@@ -400,6 +433,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, Record
 
     nonisolated func setProcessing(_ processing: Bool) {
         DispatchQueue.main.async { [weak self] in
+            if let model = self?.floatingIndicator?.model {
+                if processing {
+                    model.phase = .processing
+                } else if model.phase == .processing {
+                    // Don't clobber a new recording that started while this one was processing.
+                    model.phase = .idle
+                }
+            }
             guard let button = self?.statusItem.button else { return }
             if processing {
                 let img = NSImage(systemSymbolName: "waveform", accessibilityDescription: "Processing")

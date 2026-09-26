@@ -60,3 +60,32 @@ public enum ShortcutOutcome: Equatable {
     case ignored
     case failed(ToggleError)
 }
+
+/// Everything a finished run of the transcription pipeline produced, for delivery and for
+/// the history/metrics store.
+public struct PipelineResult: Equatable, Sendable {
+    /// Exactly what the speech-to-text model returned.
+    public let rawText: String
+    /// What was delivered: the LLM's output, or `rawText` if formatting was off or failed.
+    public let finalText: String
+    /// Whether `finalText` actually came from the LLM.
+    public let llmApplied: Bool
+    public let transcriptionDuration: Duration
+    /// Time spent in the formatter, including a failed or timed-out attempt. `nil` when no
+    /// formatter is configured at all.
+    public let formattingDuration: Duration?
+
+    public init(
+        rawText: String,
+        finalText: String,
+        llmApplied: Bool,
+        transcriptionDuration: Duration,
+        formattingDuration: Duration?
+    ) {
+        self.rawText = rawText
+        self.finalText = finalText
+        self.llmApplied = llmApplied
+        self.transcriptionDuration = transcriptionDuration
+        self.formattingDuration = formattingDuration
+    }
+}

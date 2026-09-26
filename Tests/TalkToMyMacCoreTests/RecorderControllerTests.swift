@@ -348,7 +348,7 @@ final class RecorderControllerTests: XCTestCase {
         let transcriber = MockTranscriber(result: "hello world")
         let (ctrl, _, _, _) = makeController(transcriber: transcriber)
         let result = await ctrl.processRecording(samples: [1.0, 2.0], sampleRate: 16000)
-        XCTAssertEqual(result, "hello world")
+        XCTAssertEqual(result?.finalText, "hello world")
     }
 
     func testProcessRecordingWithoutTranscriberReturnsNil() async {
@@ -409,7 +409,7 @@ final class RecorderControllerTests: XCTestCase {
         let formatter = MockFormatter(result: "Hello, World!")
         let (ctrl, _, _, _) = makeController(transcriber: transcriber, formatter: formatter)
         let result = await ctrl.processRecording(samples: [1.0], sampleRate: 16000)
-        XCTAssertEqual(result, "Hello, World!")
+        XCTAssertEqual(result?.finalText, "Hello, World!")
         XCTAssertEqual(formatter.lastInput, "hello world")
     }
 
@@ -418,14 +418,33 @@ final class RecorderControllerTests: XCTestCase {
         let formatter = MockFormatter(result: nil)
         let (ctrl, _, _, _) = makeController(transcriber: transcriber, formatter: formatter)
         let result = await ctrl.processRecording(samples: [1.0], sampleRate: 16000)
-        XCTAssertEqual(result, "hello world")
+        XCTAssertEqual(result?.finalText, "hello world")
+    }
+
+    func testProcessRecordingFormatterFailureReportsLLMNotApplied() async {
+        let transcriber = MockTranscriber(result: "hello world")
+        let formatter = MockFormatter(result: nil)
+        let (ctrl, _, _, _) = makeController(transcriber: transcriber, formatter: formatter)
+        let result = await ctrl.processRecording(samples: [1.0], sampleRate: 16000)
+        XCTAssertEqual(result?.rawText, "hello world")
+        XCTAssertEqual(result?.llmApplied, false)
+        // The attempt was still timed, so slow failures (e.g. timeouts) show up in metrics.
+        XCTAssertNotNil(result?.formattingDuration)
+    }
+
+    func testProcessRecordingWithoutFormatterHasNoFormattingDuration() async {
+        let transcriber = MockTranscriber(result: "hello world")
+        let (ctrl, _, _, _) = makeController(transcriber: transcriber)
+        let result = await ctrl.processRecording(samples: [1.0], sampleRate: 16000)
+        XCTAssertEqual(result?.llmApplied, false)
+        XCTAssertNil(result?.formattingDuration)
     }
 
     func testProcessRecordingWithoutFormatterUsesRawText() async {
         let transcriber = MockTranscriber(result: "hello world")
         let (ctrl, _, _, _) = makeController(transcriber: transcriber)
         let result = await ctrl.processRecording(samples: [1.0], sampleRate: 16000)
-        XCTAssertEqual(result, "hello world")
+        XCTAssertEqual(result?.finalText, "hello world")
     }
 
     /// The single most important fallback: if the LLM is unavailable/fails, the raw
@@ -437,7 +456,7 @@ final class RecorderControllerTests: XCTestCase {
         let sink = MockOutputSink()
         let (ctrl, _, _, _) = makeController(transcriber: transcriber, formatter: formatter, outputSink: sink)
         let result = await ctrl.processRecording(samples: [1.0], sampleRate: 16000)
-        XCTAssertEqual(result, "hello world")
+        XCTAssertEqual(result?.finalText, "hello world")
         XCTAssertEqual(sink.deliverCallCount, 1)
         XCTAssertEqual(sink.lastText, "hello world")
     }
@@ -461,14 +480,14 @@ final class RecorderControllerTests: XCTestCase {
         sink.shouldFail = true
         let (ctrl, _, _, _) = makeController(transcriber: transcriber, outputSink: sink)
         let result = await ctrl.processRecording(samples: [1.0], sampleRate: 16000)
-        XCTAssertEqual(result, "hello")
+        XCTAssertEqual(result?.finalText, "hello")
     }
 
     func testProcessRecordingWithoutOutputSinkStillReturnsText() async {
         let transcriber = MockTranscriber(result: "hello")
         let (ctrl, _, _, _) = makeController(transcriber: transcriber)
         let result = await ctrl.processRecording(samples: [1.0], sampleRate: 16000)
-        XCTAssertEqual(result, "hello")
+        XCTAssertEqual(result?.finalText, "hello")
     }
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -667,7 +686,10 @@ final class RecorderControllerTests: XCTestCase {
         XCTAssertEqual(formatter.lastInput, "raw text")
         // Output sink received formatted text
         XCTAssertEqual(sink.lastText, "Formatted Text")
-        // Return value is formatted text
-        XCTAssertEqual(result, "Formatted Text")
+        // Return value carries both the raw and the formatted text
+        XCTAssertEqual(result?.rawText, "raw text")
+        XCTAssertEqual(result?.finalText, "Formatted Text")
+        XCTAssertEqual(result?.llmApplied, true)
+        XCTAssertNotNil(result?.formattingDuration)
     }
 }

@@ -14,6 +14,10 @@ final class AudioCapture: AudioRecording {
     /// Sample rate of the raw samples (matches the hardware input).
     private(set) var lastRecordingSampleRate: Double = 0
 
+    /// Receives normalised (0…1) input levels while recording, roughly 30 per second, for
+    /// the live waveform. Called on the audio thread — hop to the main queue before UI work.
+    var onLevels: (@Sendable ([Float]) -> Void)?
+
     /// Root directory for all TalkToMyMac data.
     static var dataDirectory: URL {
         FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
@@ -59,6 +63,9 @@ final class AudioCapture: AudioRecording {
 
         audioFile = try AVAudioFile(forWriting: fileURL, settings: wavFormat.settings)
 
+        let onLevels = self.onLevels
+        let levelChunkSize = max(Int(recordingFormat.sampleRate / 30), 1)
+
         inputNode.installTap(onBus: 0, bufferSize: 4096, format: recordingFormat) { [weak self] buffer, _ in
             // Write to disk
             try? self?.audioFile?.write(from: buffer)
@@ -68,6 +75,7 @@ final class AudioCapture: AudioRecording {
                 let frameCount = Int(buffer.frameLength)
                 let samples = Array(UnsafeBufferPointer(start: channelData[0], count: frameCount))
                 accumulatedSamples.append(contentsOf: samples)
+                onLevels?(Self.levels(of: samples, chunkSize: levelChunkSize))
             }
         }
 
@@ -90,6 +98,17 @@ final class AudioCapture: AudioRecording {
         // Snapshot the accumulated samples
         lastRecordingRawSamples = _accumulatingBuffer?()
         _accumulatingBuffer = nil
+    }
+
+    /// RMS level of each `chunkSize` run of samples, mapped from -50…-10 dBFS onto 0…1
+    /// (roughly silence to loud speech).
+    private static func levels(of samples: [Float], chunkSize: Int) -> [Float] {
+        stride(from: 0, to: samples.count, by: chunkSize).map { start in
+            let chunk = samples[start..<min(start + chunkSize, samples.count)]
+            let meanSquare = chunk.reduce(0) { $0 + $1 * $1 } / Float(chunk.count)
+            let db = 10 * log10(max(meanSquare, 1e-12))
+            return min(max((db + 50) / 40, 0), 1)
+        }
     }
 
     /// Throws away the most recent (already stopped) recording: drops the in-memory

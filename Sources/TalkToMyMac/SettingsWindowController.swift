@@ -12,13 +12,15 @@ final class SettingsWindowController {
     private let formatter: FoundationModelFormatter
     private let settings: FormattingSettings
     private let shortcuts: ShortcutManager
+    private let transcriptionStore: TranscriptionStore
 
     init(speechService: SpeechTranscriptionService, formatter: FoundationModelFormatter,
-         settings: FormattingSettings, shortcuts: ShortcutManager) {
+         settings: FormattingSettings, shortcuts: ShortcutManager, transcriptionStore: TranscriptionStore) {
         self.speechService = speechService
         self.formatter = formatter
         self.settings = settings
         self.shortcuts = shortcuts
+        self.transcriptionStore = transcriptionStore
     }
 
     func showWindow() {
@@ -28,20 +30,48 @@ final class SettingsWindowController {
             return
         }
 
-        let settingsView = SettingsView(speechService: speechService, formatter: formatter, settings: settings,
-                                    shortcuts: shortcuts)
-        let hostingController = NSHostingController(rootView: settingsView)
+        // Toolbar-style tabs, as in every macOS settings window: the tab buttons live in the
+        // window's toolbar (one surface with the title bar) and the window title follows the
+        // selected tab. A SwiftUI `TabView` in a plain window instead draws a bordered tab
+        // control, which adds a separate band between the title bar and the content.
+        let tabs = NSTabViewController()
+        tabs.tabStyle = .toolbar
+        tabs.addTabViewItem(Self.tab(
+            "General",
+            symbol: "gearshape",
+            SettingsView(speechService: speechService, formatter: formatter, settings: settings,
+                         shortcuts: shortcuts)
+        ))
+        tabs.addTabViewItem(Self.tab(
+            "Instrumentation",
+            symbol: "gauge.with.dots.needle.bottom.50percent",
+            InstrumentationView(store: transcriptionStore)
+        ))
 
-        let win = NSWindow(contentViewController: hostingController)
-        win.title = "TalkToMyMac Settings"
+        let win = NSWindow(contentViewController: tabs)
         win.styleMask = [.titled, .closable]
-        win.setContentSize(NSSize(width: 500, height: 720))
+        win.toolbarStyle = .preference
+        win.setContentSize(Self.contentSize)
         win.center()
         win.isReleasedWhenClosed = false
         win.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
 
         self.window = win
+    }
+
+    /// Both tabs share one size, so switching tabs doesn't resize the window.
+    private static let contentSize = NSSize(width: 500, height: 720)
+
+    private static func tab(_ label: String, symbol: String, _ view: some View) -> NSTabViewItem {
+        let controller = NSHostingController(rootView: view)
+        controller.sizingOptions = []
+        controller.preferredContentSize = contentSize
+        controller.title = label
+        let item = NSTabViewItem(viewController: controller)
+        item.label = label
+        item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)
+        return item
     }
 }
 
