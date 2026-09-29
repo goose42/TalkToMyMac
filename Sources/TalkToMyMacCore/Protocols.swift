@@ -32,7 +32,15 @@ public protocol SpeechTranscribing: AnyObject {
 
 /// Text post-processor / formatter (e.g., LLM cleanup).
 public protocol TextFormatting: AnyObject {
+    /// Whether a recording of this length should be formatted at all. When false, the
+    /// pipeline delivers the raw transcript without calling `format(raw:)`.
+    /// Default implementation always returns true.
+    func shouldFormat(audioSeconds: Double) -> Bool
     func format(raw: String) async -> String?
+}
+
+public extension TextFormatting {
+    func shouldFormat(audioSeconds: Double) -> Bool { true }
 }
 
 /// Output delivery (clipboard, text field injection, etc.).

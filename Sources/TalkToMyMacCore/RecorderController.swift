@@ -139,10 +139,12 @@ public class RecorderController: @unchecked Sendable {
         guard let rawText = await transcriber.transcribe(samples: processedSamples, sampleRate: sampleRate) else { return nil }
         let transcriptionDuration = clock.now - transcribeStart
 
-        // 3. Format (optional — falls back to raw text on any failure)
+        // 3. Format (optional — falls back to raw text on any failure, and skipped entirely
+        //    when the formatter declines a recording this short)
         var formattedText: String?
         var formattingDuration: Duration?
-        if let formatter {
+        let audioSeconds = Double(samples.count) / sampleRate
+        if let formatter, formatter.shouldFormat(audioSeconds: audioSeconds) {
             let formatStart = clock.now
             formattedText = await formatter.format(raw: rawText)
             formattingDuration = clock.now - formatStart

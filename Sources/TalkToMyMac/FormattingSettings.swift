@@ -16,6 +16,8 @@ final class FormattingSettings: @unchecked Sendable {
         static let promptPreset = "promptPreset"
         static let customInstructions = "customInstructions"
         static let autoPasteEnabled = "autoPasteEnabled"
+        static let skipShortDictations = "skipShortDictations"
+        static let minimumFormattingSeconds = "minimumFormattingSeconds"
     }
 
     /// Whether the LLM formatting step runs at all. When false, `processRecording` delivers
@@ -37,6 +39,18 @@ final class FormattingSettings: @unchecked Sendable {
     /// gets sent as the system prompt. Selecting a preset just seeds this field.
     var customInstructions: String {
         didSet { UserDefaults.standard.set(customInstructions, forKey: Keys.customInstructions) }
+    }
+
+    /// When true, recordings shorter than `minimumFormattingSeconds` skip the LLM step and
+    /// deliver the raw transcript — a word or two (often a correction) isn't worth formatting.
+    var skipShortDictations: Bool {
+        didSet { UserDefaults.standard.set(skipShortDictations, forKey: Keys.skipShortDictations) }
+    }
+
+    /// Recording length, in seconds, below which formatting is skipped when
+    /// `skipShortDictations` is on.
+    var minimumFormattingSeconds: Double {
+        didSet { UserDefaults.standard.set(minimumFormattingSeconds, forKey: Keys.minimumFormattingSeconds) }
     }
 
     /// Whether a successful transcript should be pasted at the cursor automatically.
@@ -67,6 +81,8 @@ final class FormattingSettings: @unchecked Sendable {
 
         isEnabled = defaults.object(forKey: Keys.llmFormattingEnabled) as? Bool ?? true
         autoPasteEnabled = defaults.object(forKey: Keys.autoPasteEnabled) as? Bool ?? true
+        skipShortDictations = defaults.object(forKey: Keys.skipShortDictations) as? Bool ?? false
+        minimumFormattingSeconds = defaults.object(forKey: Keys.minimumFormattingSeconds) as? Double ?? 2.0
         preset = resolvedPreset
         customInstructions = resolvedCustomInstructions
     }

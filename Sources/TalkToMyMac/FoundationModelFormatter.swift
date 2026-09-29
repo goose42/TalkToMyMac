@@ -25,6 +25,13 @@ final class FoundationModelFormatter: TextFormatting, @unchecked Sendable {
         self.responseTimeout = responseTimeout
     }
 
+    func shouldFormat(audioSeconds: Double) -> Bool {
+        guard settings.skipShortDictations, audioSeconds < settings.minimumFormattingSeconds else { return true }
+        print("[FoundationModelFormatter] Skipping formatting: \(String(format: "%.2f", audioSeconds))s "
+              + "is under the \(settings.minimumFormattingSeconds)s minimum")
+        return false
+    }
+
     func format(raw: String) async -> String? {
         guard settings.isEnabled else { return nil }
         guard case .available = model.availability else {
