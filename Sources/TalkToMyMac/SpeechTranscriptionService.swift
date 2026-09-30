@@ -32,9 +32,6 @@ final class SpeechTranscriptionService: SpeechTranscribing, @unchecked Sendable 
     private(set) var isDownloading = false
     private(set) var loadError: String?
 
-    /// Callback updated whenever status changes (always called on main queue).
-    var onStatusChange: (@Sendable (String) -> Void)?
-
     init(preferredLocale: Locale = .current) {
         // Placeholder until `prepare()` resolves a locale the transcriber actually supports.
         self.resolvedLocale = preferredLocale
@@ -52,12 +49,9 @@ final class SpeechTranscriptionService: SpeechTranscribing, @unchecked Sendable 
     /// Resolves the best-supported locale, checks/downloads the on-device model asset, and
     /// marks the service ready. Safe to call more than once (e.g. on relaunch).
     func prepare() async {
-        notifyStatus("⏳ Checking availability…")
-
         guard SpeechTranscriber.isAvailable else {
             isReady = false
             loadError = "Speech recognition unavailable on this device"
-            notifyStatus("❌ Unavailable")
             return
         }
 
@@ -70,17 +64,14 @@ final class SpeechTranscriptionService: SpeechTranscribing, @unchecked Sendable 
         case .installed:
             isReady = true
             loadError = nil
-            notifyStatus("✅ Ready")
         case .supported, .downloading:
             await downloadModelIfNeeded()
         case .unsupported:
             isReady = false
             loadError = "Locale \(locale.identifier) not supported"
-            notifyStatus("❌ Unsupported locale")
         @unknown default:
             isReady = false
             loadError = "Unknown asset status"
-            notifyStatus("❌ Unknown")
         }
     }
 
@@ -91,7 +82,6 @@ final class SpeechTranscriptionService: SpeechTranscribing, @unchecked Sendable 
         // guard against kicking off a second concurrent install request.
         guard !isDownloading else { return }
         isDownloading = true
-        notifyStatus("⏳ Downloading speech model…")
         do {
             if let request = try await AssetInventory.assetInstallationRequest(supporting: [makeTranscriber()]) {
                 try await request.downloadAndInstall()
@@ -100,12 +90,10 @@ final class SpeechTranscriptionService: SpeechTranscribing, @unchecked Sendable 
             isReady = true
             loadError = nil
             isDownloading = false
-            notifyStatus("✅ Ready")
         } catch {
             isReady = false
             isDownloading = false
             loadError = "Download failed: \(error.localizedDescription)"
-            notifyStatus("❌ \(error.localizedDescription)")
         }
     }
 
@@ -166,14 +154,5 @@ final class SpeechTranscriptionService: SpeechTranscribing, @unchecked Sendable 
 
         let text = await resultsTask.value
         return text.isEmpty ? nil : text
-    }
-
-    private func notifyStatus(_ status: String) {
-        let cb = onStatusChange
-        if Thread.isMainThread {
-            cb?(status)
-        } else {
-            DispatchQueue.main.async { cb?(status) }
-        }
     }
 }

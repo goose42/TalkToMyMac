@@ -1,4 +1,5 @@
 import AppKit
+import AVFoundation
 import SwiftUI
 import TalkToMyMacCore
 
@@ -101,6 +102,9 @@ private struct SettingsView: View {
     let shortcuts: ShortcutManager
     let floatingIndicator: FloatingIndicatorController
 
+    // Both are granted out-of-process in System Settings with no notification to observe,
+    // so they're polled while this tab is on screen.
+    @State private var micStatus = AVCaptureDevice.authorizationStatus(for: .audio)
     @State private var accessibilityTrusted = PasteDelivery.isAccessibilityTrusted
     /// Mirrors `floatingIndicator.isVisible`, which isn't observable; Settings is the only
     /// place it changes.
@@ -162,19 +166,37 @@ private struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
-            Section("Speech") {
+            Section("Permissions") {
+                microphoneStatusView
+                accessibilityStatusView
+            }
+
+            Section {
                 speechStatusView
+            } header: {
+                Text("Speech Model")
+            } footer: {
+                Text("Transcription uses Apple's on-device speech model for your Mac's language. "
+                     + "macOS downloads it once, the first time the app runs; after that it works offline.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section("Delivery") {
                 Toggle("Paste at cursor after dictation", isOn: $settings.autoPasteEnabled)
-                accessibilityStatusView
             }
         }
         .padding(20)
         .frame(minWidth: 440)
         .task {
             await speechService.prepare()
+        }
+        .task {
+            while !Task.isCancelled {
+                micStatus = AVCaptureDevice.authorizationStatus(for: .audio)
+                accessibilityTrusted = PasteDelivery.isAccessibilityTrusted
+                try? await Task.sleep(for: .seconds(2))
+            }
         }
     }
 
@@ -210,6 +232,38 @@ private struct SettingsView: View {
         }
     }
 
+    // MARK: Microphone status
+
+    @ViewBuilder
+    private var microphoneStatusView: some View {
+        switch micStatus {
+        case .authorized:
+            Label("Microphone access granted", systemImage: "checkmark.circle.fill")
+                .foregroundStyle(.green)
+                .font(.caption)
+        case .notDetermined:
+            VStack(alignment: .leading, spacing: 8) {
+                Label("Microphone access not yet requested", systemImage: "questionmark.circle.fill")
+                    .foregroundStyle(.orange)
+                    .font(.caption)
+                Button("Request Access") {
+                    AVCaptureDevice.requestAccess(for: .audio) { _ in }
+                }
+            }
+        default:
+            VStack(alignment: .leading, spacing: 8) {
+                Label("Microphone access denied — required to record", systemImage: "xmark.circle.fill")
+                    .foregroundStyle(.red)
+                    .font(.caption)
+                Button("Open System Settings…") {
+                    if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+            }
+        }
+    }
+
     // MARK: Accessibility status
 
     @ViewBuilder
@@ -226,13 +280,6 @@ private struct SettingsView: View {
                 Button("Grant Access…") {
                     PasteDelivery.requestAccessibilityPermission()
                     PasteDelivery.openAccessibilitySettings()
-                    // The grant happens in System Settings, outside our process — poll
-                    // briefly afterward to pick it up without requiring a relaunch.
-                    for delay in [1.0, 2.0, 4.0, 8.0, 15.0] {
-                        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-                            accessibilityTrusted = PasteDelivery.isAccessibilityTrusted
-                        }
-                    }
                 }
                 Text("You may need to relaunch TalkToMyMac after granting access.")
                     .font(.caption2)

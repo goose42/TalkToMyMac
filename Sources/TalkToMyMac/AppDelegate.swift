@@ -8,17 +8,12 @@ import TalkToMyMacCore
 
 @available(macOS 26.0, *)
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, RecordingIndicator, PermissionChecking {
+final class AppDelegate: NSObject, NSApplicationDelegate, RecordingIndicator, PermissionChecking {
 
     // -- UI --
     private var statusItem: NSStatusItem!
     private var menu: NSMenu!
     private var toggleMenuItem: NSMenuItem!
-    private var micPermMenuItem: NSMenuItem!
-    private var accessibilityMenuItem: NSMenuItem!
-    private var sttStatusMenuItem: NSMenuItem!
-    private var holdShortcutMenuItem: NSMenuItem!
-    private var toggleShortcutMenuItem: NSMenuItem!
     /// Polls for Accessibility being granted, since that happens out-of-process in
     /// System Settings and there's no notification for it.
     private var accessibilityWatchTimer: Timer?
@@ -100,10 +95,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, Record
         }
         shortcuts.start()
 
-        speechService.onStatusChange = { [weak self] _ in
-            DispatchQueue.main.async { self?.refreshSttStatus() }
-        }
-
         // Surface a skipped paste instead of failing silently — the user has no other way
         // to tell the difference between "permission missing" and "the app is broken".
         // `PasteDelivery.skip` already hops to the main queue before invoking this.
@@ -115,7 +106,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, Record
         // model asset may need to be resolved/downloaded on first launch.
         Task { [weak self] in
             await self?.speechService.prepare()
-            self?.refreshSttStatus()
         }
 
         requestPermissionsAtLaunch()
@@ -143,7 +133,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, Record
         if micPermission() == .notDetermined {
             AVCaptureDevice.requestAccess(for: .audio) { [weak self] _ in
                 DispatchQueue.main.async {
-                    self?.refreshMicPermItem()
                     self?.requestAccessibilityIfNeeded()
                 }
             }
@@ -156,13 +145,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, Record
     /// Prompts for Accessibility only when auto-paste is actually enabled and we don't
     /// already have it — re-prompting when already trusted would nag on every launch.
     private func requestAccessibilityIfNeeded() {
-        guard formattingSettings.autoPasteEnabled, !PasteDelivery.isAccessibilityTrusted else {
-            refreshAccessibilityItem()
-            return
-        }
+        guard formattingSettings.autoPasteEnabled, !PasteDelivery.isAccessibilityTrusted else { return }
         // Shows the system's "open System Settings" dialog.
         PasteDelivery.requestAccessibilityPermission()
-        refreshAccessibilityItem()
     }
 
     /// Accessibility is granted out-of-process, with no notification to observe, so poll.
@@ -171,7 +156,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, Record
         accessibilityWatchTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
-                self.refreshAccessibilityItem()
                 if PasteDelivery.isAccessibilityTrusted {
                     // Fn shortcuts use an event tap that can't exist before this point.
                     self.shortcuts.retryFailedRegistrations()
@@ -183,12 +167,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, Record
     }
 
     private func handlePasteSkipped(_ reason: PasteDelivery.SkipReason) {
-        refreshAccessibilityItem()
         // Only the missing-permission case is worth interrupting the user about; the others
         // are either intentional (toggle off) or self-evident.
         guard case .accessibilityNotTrusted = reason else { return }
-        // Once per launch — the menu item carries the status from then on, and an alert on
-        // every dictation would be worse than the original silence.
+        // Once per launch — Settings → General carries the status from then on, and an alert
+        // on every dictation would be worse than the original silence.
         guard !hasShownAccessibilityAlert else { return }
         hasShownAccessibilityAlert = true
         let alert = NSAlert()
@@ -215,39 +198,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, Record
 
     private func buildMenu() {
         menu = NSMenu()
-        menu.delegate = self
 
         toggleMenuItem = NSMenuItem(title: "Start Recording", action: #selector(toggleRecording), keyEquivalent: "")
         toggleMenuItem.target = self
         menu.addItem(toggleMenuItem)
-
-        menu.addItem(NSMenuItem.separator())
-
-        micPermMenuItem = NSMenuItem(title: "Mic: \(micPermissionLabel())", action: nil, keyEquivalent: "")
-        micPermMenuItem.isEnabled = false
-        menu.addItem(micPermMenuItem)
-
-        // Clickable when not yet granted, so there's an obvious path to fixing it.
-        accessibilityMenuItem = NSMenuItem(
-            title: "Accessibility: …",
-            action: #selector(grantAccessibility),
-            keyEquivalent: ""
-        )
-        accessibilityMenuItem.target = self
-        menu.addItem(accessibilityMenuItem)
-        refreshAccessibilityItem()
-
-        holdShortcutMenuItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
-        holdShortcutMenuItem.isEnabled = false
-        menu.addItem(holdShortcutMenuItem)
-        toggleShortcutMenuItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
-        toggleShortcutMenuItem.isEnabled = false
-        menu.addItem(toggleShortcutMenuItem)
-        refreshShortcutItems()
-
-        sttStatusMenuItem = NSMenuItem(title: "STT: Loading…", action: nil, keyEquivalent: "")
-        sttStatusMenuItem.isEnabled = false
-        menu.addItem(sttStatusMenuItem)
 
         menu.addItem(NSMenuItem.separator())
 
@@ -259,11 +213,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, Record
 
         let quitItem = NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         menu.addItem(quitItem)
-    }
-
-    /// Shortcuts can change in Settings at any time, so refresh their labels on open.
-    func menuWillOpen(_ menu: NSMenu) {
-        refreshShortcutItems()
     }
 
     @objc private func toggleRecording() {
@@ -299,17 +248,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, Record
         case .failed(.recordingFailed(let msg)):
             logger.error("Recording failed: \(msg, privacy: .public)")
         }
-        refreshMicPermItem()
     }
 
     private func recordingEnded() {
         toggleMenuItem.title = "Start Recording"
         shortcuts.setEscapeActive(false)
-    }
-
-    private func refreshShortcutItems() {
-        holdShortcutMenuItem?.title = "Hold to talk: \(shortcuts.holdShortcut.displayString)"
-        toggleShortcutMenuItem?.title = "Start/stop: \(shortcuts.toggleShortcut.displayString)  (Esc discards)"
     }
 
     // MARK: Post-recording pipeline
@@ -399,9 +342,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, Record
     }
 
     nonisolated func requestMicPermission() {
-        AVCaptureDevice.requestAccess(for: .audio) { [weak self] _ in
-            DispatchQueue.main.async { self?.refreshMicPermItem() }
-        }
+        AVCaptureDevice.requestAccess(for: .audio) { _ in }
     }
 
     @objc private func openSettings() {
@@ -416,41 +357,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, Record
         case .denied:          return "Denied"
         case .notDetermined:   return "Not Determined"
         }
-    }
-
-    private func refreshMicPermItem() {
-        micPermMenuItem?.title = "Mic: \(micPermissionLabel())"
-    }
-
-    private func refreshAccessibilityItem() {
-        guard let item = accessibilityMenuItem else { return }
-        if PasteDelivery.isAccessibilityTrusted {
-            item.title = "Accessibility: Granted"
-            item.isEnabled = false
-        } else {
-            item.title = "Accessibility: Not Granted — Fix…"
-            item.isEnabled = true
-        }
-    }
-
-    @objc private func grantAccessibility() {
-        PasteDelivery.requestAccessibilityPermission()
-        PasteDelivery.openAccessibilitySettings()
-        startAccessibilityWatch()
-    }
-
-    private func refreshSttStatus() {
-        let status: String
-        if speechService.isReady {
-            status = "✅ Ready (\(speechService.resolvedLocale.identifier))"
-        } else if speechService.isDownloading {
-            status = "⏳ Downloading model…"
-        } else if let err = speechService.loadError {
-            status = "❌ \(err)"
-        } else {
-            status = "⏳ Checking…"
-        }
-        sttStatusMenuItem?.title = "STT: \(status)"
     }
 
     private func showPermissionDeniedAlert() {
