@@ -59,6 +59,11 @@ final class SettingsWindowController {
             symbol: "gauge.with.dots.needle.bottom.50percent",
             InstrumentationView(store: transcriptionStore)
         ))
+        tabs.addTabViewItem(Self.tab(
+            "Storage",
+            symbol: "internaldrive",
+            StorageView(store: transcriptionStore)
+        ))
 
         let win = NSWindow(contentViewController: tabs)
         win.styleMask = [.titled, .closable]
@@ -72,7 +77,7 @@ final class SettingsWindowController {
         self.window = win
     }
 
-    /// Both tabs share one size, so switching tabs doesn't resize the window.
+    /// All tabs share one size, so switching tabs doesn't resize the window.
     private static let contentSize = NSSize(width: 500, height: 720)
 
     private static func tab(_ label: String, symbol: String, _ view: some View) -> NSTabViewItem {
@@ -164,16 +169,6 @@ private struct SettingsView: View {
             Section("Delivery") {
                 Toggle("Paste at cursor after dictation", isOn: $settings.autoPasteEnabled)
                 accessibilityStatusView
-            }
-
-            Section("Recordings") {
-                LabeledContent("Audio files") {
-                    Button("Show in Finder") {
-                        let dir = AudioCapture.recordingsDirectory
-                        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-                        NSWorkspace.shared.open(dir)
-                    }
-                }
             }
         }
         .padding(20)

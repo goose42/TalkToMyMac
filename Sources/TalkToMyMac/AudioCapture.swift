@@ -29,6 +29,29 @@ final class AudioCapture: AudioRecording {
         dataDirectory.appendingPathComponent("Recordings", isDirectory: true)
     }
 
+    /// Number and total size of the saved recordings.
+    static func recordingsUsage() -> (count: Int, bytes: Int64) {
+        recordingFiles().reduce((0, 0)) { total, url in
+            let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+            return (total.0 + 1, total.1 + Int64(size))
+        }
+    }
+
+    /// Deletes every saved recording. Returns how many files couldn't be removed.
+    @discardableResult
+    static func purgeRecordings() -> Int {
+        recordingFiles().reduce(0) { failures, url in
+            (try? FileManager.default.removeItem(at: url)) == nil ? failures + 1 : failures
+        }
+    }
+
+    private static func recordingFiles() -> [URL] {
+        let files = (try? FileManager.default.contentsOfDirectory(
+            at: recordingsDirectory, includingPropertiesForKeys: [.fileSizeKey],
+            options: .skipsHiddenFiles
+        )) ?? []
+        return files.filter { $0.pathExtension.lowercased() == "wav" }
+    }
 
 
     func start() throws {

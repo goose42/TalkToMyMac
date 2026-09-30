@@ -33,13 +33,32 @@ final class TranscriptionStore {
     /// Posted on the main queue after a dictation is recorded.
     static let didChangeNotification = Notification.Name("TranscriptionStoreDidChange")
 
+    /// The tables the store manages. Raw values are the SQL table names.
+    enum Table: String, CaseIterable {
+        case raw = "raw_transcriptions"
+        case formatted = "formatted_transcriptions"
+        case metrics = "transcription_metrics"
+    }
+
+    /// Row count and on-disk footprint of one table.
+    struct TableUsage {
+        let table: Table
+        let rowCount: Int
+        /// Bytes of pages held by the table and its indexes; nil if SQLite can't report it.
+        let bytes: Int64?
+    }
+
+    static var databaseURL: URL {
+        AudioCapture.dataDirectory.appendingPathComponent("transcription_history.sqlite")
+    }
+
     private var db: OpaquePointer?
 
     /// Opens (or creates) the database at the standard location.
     init() {
         let dir = AudioCapture.dataDirectory
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let dbPath = dir.appendingPathComponent("transcription_history.sqlite").path
+        let dbPath = Self.databaseURL.path
 
         if sqlite3_open(dbPath, &db) != SQLITE_OK {
             print("[TranscriptionStore] Failed to open database at \(dbPath)")
@@ -221,6 +240,82 @@ final class TranscriptionStore {
             ))
         }
         return results
+    }
+
+    // MARK: - Storage
+
+    /// Size of the database file on disk, including any rollback journal.
+    func fileSize() -> Int64 {
+        let path = Self.databaseURL.path
+        return [path, path + "-journal", path + "-wal"].reduce(0) { total, path in
+            let size = (try? FileManager.default.attributesOfItem(atPath: path)[.size]) as? NSNumber
+            return total + (size?.int64Value ?? 0)
+        }
+    }
+
+    /// Row counts and page usage for each table.
+    func tableUsage() -> [TableUsage] {
+        guard db != nil else { return [] }
+        let bytes = pageBytesByTable()
+        return Table.allCases.map { table in
+            TableUsage(
+                table: table,
+                rowCount: Int(scalar("SELECT COUNT(*) FROM \(table.rawValue);") ?? 0),
+                bytes: bytes?[table.rawValue]
+            )
+        }
+    }
+
+    /// Deletes every row from `tables`, then vacuums so the file actually shrinks.
+    /// Returns false (and logs) on failure, leaving the tables untouched.
+    @discardableResult
+    func purge(_ tables: [Table]) -> Bool {
+        guard db != nil, !tables.isEmpty else { return false }
+
+        let deletes = tables.map { "DELETE FROM \($0.rawValue);" }.joined(separator: "\n")
+        guard sqlite3_exec(db, "BEGIN;\n\(deletes)\nCOMMIT;", nil, nil, nil) == SQLITE_OK else {
+            print("[TranscriptionStore] Purge failed, rolling back: \(errorMessage)")
+            sqlite3_exec(db, "ROLLBACK;", nil, nil, nil)
+            return false
+        }
+        if sqlite3_exec(db, "VACUUM;", nil, nil, nil) != SQLITE_OK {
+            print("[TranscriptionStore] Vacuum failed: \(errorMessage)")
+        }
+
+        print("[TranscriptionStore] Purged \(tables.map(\.rawValue).joined(separator: ", "))")
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: Self.didChangeNotification, object: nil)
+        }
+        return true
+    }
+
+    /// Bytes of pages per table, with each table's indexes counted toward it. Uses the
+    /// `dbstat` virtual table, which is an optional SQLite build feature — nil if missing.
+    private func pageBytesByTable() -> [String: Int64]? {
+        let sql = """
+            SELECT m.tbl_name, SUM(d.pgsize) FROM dbstat d
+            JOIN sqlite_master m ON m.name = d.name GROUP BY m.tbl_name;
+            """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            print("[TranscriptionStore] dbstat unavailable: \(errorMessage)")
+            return nil
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        var result: [String: Int64] = [:]
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            result[String(cString: sqlite3_column_text(stmt, 0))] = sqlite3_column_int64(stmt, 1)
+        }
+        return result
+    }
+
+    /// First column of the first row of a parameterless query.
+    private func scalar(_ sql: String) -> Int64? {
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
+        defer { sqlite3_finalize(stmt) }
+        return sqlite3_step(stmt) == SQLITE_ROW ? sqlite3_column_int64(stmt, 0) : nil
     }
 
     // MARK: - Helpers
