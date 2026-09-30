@@ -3,7 +3,7 @@ import SwiftUI
 import TalkToMyMacCore
 
 /// Settings tab for the LLM formatting step: on/off, prompt preset and instructions, and
-/// the minimum recording length worth formatting.
+/// the word count a transcript must exceed to be worth formatting.
 @available(macOS 26.0, *)
 struct FormattingView: View {
     let formatter: FoundationModelFormatter
@@ -41,16 +41,16 @@ struct FormattingView: View {
             Section {
                 Toggle("Skip formatting for short dictations", isOn: $settings.skipShortDictations)
 
-                Stepper(value: $settings.minimumFormattingSeconds, in: 0.5...30, step: 0.5) {
-                    Text("Minimum length: \(settings.minimumFormattingSeconds, specifier: "%.1f") s")
+                Stepper(value: $settings.formattingWordThreshold, in: 1...50) {
+                    Text("Format only above \(settings.formattingWordThreshold) "
+                         + (settings.formattingWordThreshold == 1 ? "word" : "words"))
                 }
                 .disabled(!settings.skipShortDictations)
             } header: {
                 Text("Short Dictations")
             } footer: {
-                Text("Recordings shorter than the minimum deliver the raw transcript without the "
-                     + "LLM step — a word or two, like a quick correction, rarely needs formatting. "
-                     + "Length is the whole recording, including any pause before or after speaking.")
+                Text("Transcripts at or below this word count are delivered as-is, without the "
+                     + "LLM step — a word or two, like a quick correction, rarely needs formatting.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

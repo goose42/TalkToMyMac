@@ -25,10 +25,10 @@ final class FoundationModelFormatter: TextFormatting, @unchecked Sendable {
         self.responseTimeout = responseTimeout
     }
 
-    func shouldFormat(audioSeconds: Double) -> Bool {
-        guard settings.skipShortDictations, audioSeconds < settings.minimumFormattingSeconds else { return true }
-        print("[FoundationModelFormatter] Skipping formatting: \(String(format: "%.2f", audioSeconds))s "
-              + "is under the \(settings.minimumFormattingSeconds)s minimum")
+    func shouldFormat(wordCount: Int) -> Bool {
+        guard settings.skipShortDictations, wordCount <= settings.formattingWordThreshold else { return true }
+        print("[FoundationModelFormatter] Skipping formatting: \(wordCount) word(s) "
+              + "doesn't exceed the \(settings.formattingWordThreshold)-word threshold")
         return false
     }
 

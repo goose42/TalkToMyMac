@@ -86,14 +86,14 @@ final class MockFormatter: TextFormatting {
     var formatCallCount = 0
     var lastInput: String?
     var shouldFormatResult = true
-    var lastAudioSeconds: Double?
+    var lastWordCount: Int?
 
     init(result: String? = nil) {
         self.formatResult = result
     }
 
-    func shouldFormat(audioSeconds: Double) -> Bool {
-        lastAudioSeconds = audioSeconds
+    func shouldFormat(wordCount: Int) -> Bool {
+        lastWordCount = wordCount
         return shouldFormatResult
     }
 
@@ -466,12 +466,12 @@ final class RecorderControllerTests: XCTestCase {
         XCTAssertEqual(formatter.formatCallCount, 0)
     }
 
-    func testProcessRecordingPassesAudioSecondsToShouldFormat() async {
-        let transcriber = MockTranscriber(result: "hello")
-        let formatter = MockFormatter(result: "Hello.")
+    func testProcessRecordingPassesTranscriptWordCountToShouldFormat() async {
+        let transcriber = MockTranscriber(result: "  move that  to the\nleft ")
+        let formatter = MockFormatter(result: "Move that to the left.")
         let (ctrl, _, _, _) = makeController(transcriber: transcriber, formatter: formatter)
-        _ = await ctrl.processRecording(samples: [Float](repeating: 0, count: 32000), sampleRate: 16000)
-        XCTAssertEqual(formatter.lastAudioSeconds, 2.0)
+        _ = await ctrl.processRecording(samples: [1.0], sampleRate: 16000)
+        XCTAssertEqual(formatter.lastWordCount, 5)
     }
 
     /// The single most important fallback: if the LLM is unavailable/fails, the raw

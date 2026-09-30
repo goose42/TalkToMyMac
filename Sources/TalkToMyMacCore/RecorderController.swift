@@ -140,11 +140,10 @@ public class RecorderController: @unchecked Sendable {
         let transcriptionDuration = clock.now - transcribeStart
 
         // 3. Format (optional — falls back to raw text on any failure, and skipped entirely
-        //    when the formatter declines a recording this short)
+        //    when the formatter declines a transcript this short)
         var formattedText: String?
         var formattingDuration: Duration?
-        let audioSeconds = Double(samples.count) / sampleRate
-        if let formatter, formatter.shouldFormat(audioSeconds: audioSeconds) {
+        if let formatter, formatter.shouldFormat(wordCount: WordDiff.wordCount(rawText)) {
             let formatStart = clock.now
             formattedText = await formatter.format(raw: rawText)
             formattingDuration = clock.now - formatStart

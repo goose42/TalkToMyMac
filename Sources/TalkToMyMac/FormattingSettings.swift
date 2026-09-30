@@ -17,7 +17,7 @@ final class FormattingSettings: @unchecked Sendable {
         static let customInstructions = "customInstructions"
         static let autoPasteEnabled = "autoPasteEnabled"
         static let skipShortDictations = "skipShortDictations"
-        static let minimumFormattingSeconds = "minimumFormattingSeconds"
+        static let formattingWordThreshold = "formattingWordThreshold"
     }
 
     /// Whether the LLM formatting step runs at all. When false, `processRecording` delivers
@@ -41,16 +41,16 @@ final class FormattingSettings: @unchecked Sendable {
         didSet { UserDefaults.standard.set(customInstructions, forKey: Keys.customInstructions) }
     }
 
-    /// When true, recordings shorter than `minimumFormattingSeconds` skip the LLM step and
-    /// deliver the raw transcript — a word or two (often a correction) isn't worth formatting.
+    /// When true, transcripts of `formattingWordThreshold` words or fewer skip the LLM step
+    /// and are delivered raw — a word or two (often a correction) isn't worth formatting.
     var skipShortDictations: Bool {
         didSet { UserDefaults.standard.set(skipShortDictations, forKey: Keys.skipShortDictations) }
     }
 
-    /// Recording length, in seconds, below which formatting is skipped when
+    /// Transcripts must have more than this many words to be formatted when
     /// `skipShortDictations` is on.
-    var minimumFormattingSeconds: Double {
-        didSet { UserDefaults.standard.set(minimumFormattingSeconds, forKey: Keys.minimumFormattingSeconds) }
+    var formattingWordThreshold: Int {
+        didSet { UserDefaults.standard.set(formattingWordThreshold, forKey: Keys.formattingWordThreshold) }
     }
 
     /// Whether a successful transcript should be pasted at the cursor automatically.
@@ -82,7 +82,7 @@ final class FormattingSettings: @unchecked Sendable {
         isEnabled = defaults.object(forKey: Keys.llmFormattingEnabled) as? Bool ?? true
         autoPasteEnabled = defaults.object(forKey: Keys.autoPasteEnabled) as? Bool ?? true
         skipShortDictations = defaults.object(forKey: Keys.skipShortDictations) as? Bool ?? false
-        minimumFormattingSeconds = defaults.object(forKey: Keys.minimumFormattingSeconds) as? Double ?? 2.0
+        formattingWordThreshold = defaults.object(forKey: Keys.formattingWordThreshold) as? Int ?? 3
         preset = resolvedPreset
         customInstructions = resolvedCustomInstructions
     }
