@@ -16,6 +16,10 @@
     <string>APPL</string>
     <key>CFBundleExecutable</key>
     <string>TalkToMyMac</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.productivity</string>
     <key>LSMinimumSystemVersion</key>
     <string>26.0</string>
     <key>LSUIElement</key>

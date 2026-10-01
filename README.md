@@ -42,6 +42,23 @@ or need to change one later, the menu bar shows live Mic and Accessibility statu
 Accessibility row is clickable to re-open the right System Settings pane. **After granting
 Accessibility you generally need to relaunch the app** before synthetic keystrokes work.
 
+## Installing
+
+```sh
+make install     # creates the signing certificate if needed, builds, installs, launches
+make uninstall   # removes /Applications/TalkToMyMac.app (settings and data are kept)
+```
+
+`make install` runs `make setup-signing` (a no-op if the certificate already exists), builds
+the app, quits any running copy, and copies it to `/Applications/TalkToMyMac.app`. From
+there it appears with its icon in Finder, Spotlight, and Launchpad, and can be managed from
+System Settings (Privacy & Security, Login Items). Re-run it to update an installed copy.
+Because both copies are signed with the same certificate, permissions granted once carry
+over across reinstalls.
+
+The icon comes from `Resources/AppIcon.png` (1024×1024), drawn by
+`scripts/generate-icon.swift`. Replace the PNG, or edit and re-run the script, to change it.
+
 ## One-time setup: signing (do this first)
 
 ```sh
