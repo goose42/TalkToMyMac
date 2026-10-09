@@ -64,6 +64,19 @@ struct FormattingView: View {
 
     @ViewBuilder
     private var formattingStatusView: some View {
+        switch settings.provider {
+        case .appleOnDevice:
+            onDeviceStatusView
+        case .groq:
+            Label("Using Groq · \(settings.groqModel.rawValue) — change in the Models tab",
+                  systemImage: "cloud.fill")
+                .foregroundStyle(.secondary)
+                .font(.caption)
+        }
+    }
+
+    @ViewBuilder
+    private var onDeviceStatusView: some View {
         switch formatter.availability {
         case .available:
             Label("Apple Intelligence: available", systemImage: "checkmark.circle.fill")

@@ -25,13 +25,6 @@ final class FoundationModelFormatter: TextFormatting, @unchecked Sendable {
         self.responseTimeout = responseTimeout
     }
 
-    func shouldFormat(wordCount: Int) -> Bool {
-        guard settings.skipShortDictations, wordCount <= settings.formattingWordThreshold else { return true }
-        print("[FoundationModelFormatter] Skipping formatting: \(wordCount) word(s) "
-              + "doesn't exceed the \(settings.formattingWordThreshold)-word threshold")
-        return false
-    }
-
     func format(raw: String) async -> String? {
         guard settings.isEnabled else { return nil }
         guard case .available = model.availability else {

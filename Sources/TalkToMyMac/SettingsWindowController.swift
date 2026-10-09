@@ -10,6 +10,7 @@ final class SettingsWindowController {
     private var window: NSWindow?
     private let speechService: SpeechTranscriptionService
     private let formatter: FoundationModelFormatter
+    private let groqFormatter: GroqFormatter
     private let settings: FormattingSettings
     private let shortcuts: ShortcutManager
     private let transcriptionStore: TranscriptionStore
@@ -17,10 +18,11 @@ final class SettingsWindowController {
     private let dictionaryEditor: DictionaryEditor
 
     init(speechService: SpeechTranscriptionService, formatter: FoundationModelFormatter,
-         settings: FormattingSettings, shortcuts: ShortcutManager, transcriptionStore: TranscriptionStore,
+         groqFormatter: GroqFormatter, settings: FormattingSettings, shortcuts: ShortcutManager, transcriptionStore: TranscriptionStore,
          floatingIndicator: FloatingIndicatorController) {
         self.speechService = speechService
         self.formatter = formatter
+        self.groqFormatter = groqFormatter
         self.settings = settings
         self.shortcuts = shortcuts
         self.transcriptionStore = transcriptionStore
@@ -61,6 +63,11 @@ final class SettingsWindowController {
             "Formatting",
             symbol: "wand.and.stars",
             FormattingView(formatter: formatter, settings: settings)
+        ))
+        tabs.addTabViewItem(Self.tab(
+            "Models",
+            symbol: "cpu",
+            ModelsView(groqFormatter: groqFormatter, settings: settings)
         ))
         tabs.addTabViewItem(Self.tab(
             "Transcriptions",

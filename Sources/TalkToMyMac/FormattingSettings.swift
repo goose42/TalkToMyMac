@@ -3,7 +3,7 @@ import Observation
 import TalkToMyMacCore
 
 /// UserDefaults-backed, observable settings for the LLM formatting and auto-paste steps.
-/// A single instance is shared between `FoundationModelFormatter`, `PasteDelivery`, and the
+/// A single instance is shared between the formatters, `PasteDelivery`, and the
 /// Settings UI so changes take effect immediately without restarting the app.
 /// `@unchecked Sendable`: deliberately shared between the main-actor Settings UI and the
 /// non-isolated formatter/paste-delivery objects on the recording pipeline. `@Observable`'s
@@ -20,6 +20,8 @@ final class FormattingSettings: @unchecked Sendable {
         static let formattingWordThreshold = "formattingWordThreshold"
         static let dictionaryJSON = "dictionaryJSON"
         static let dictionaryFolderPath = "dictionaryFolderPath"
+        static let formattingProvider = "formattingProvider"
+        static let groqModel = "groqModel"
         /// Plain word list from the first, unreleased version of the dictionary; migrated
         /// into `dictionaryJSON` on launch.
         static let legacyDictionaryWords = "dictionaryWords"
@@ -74,6 +76,16 @@ final class FormattingSettings: @unchecked Sendable {
     /// a hand edit or another Mac's copy isn't clobbered; `overwriteDictionaryFile()` resolves it.
     private(set) var dictionaryFileError: String?
 
+    /// Which model formats transcripts: Apple's on-device model or a remote one.
+    var provider: FormattingProvider {
+        didSet { UserDefaults.standard.set(provider.rawValue, forKey: Keys.formattingProvider) }
+    }
+
+    /// The model used when `provider` is `.groq`.
+    var groqModel: GroqModel {
+        didSet { UserDefaults.standard.set(groqModel.rawValue, forKey: Keys.groqModel) }
+    }
+
     /// Whether a successful transcript should be pasted at the cursor automatically.
     var autoPasteEnabled: Bool {
         didSet { UserDefaults.standard.set(autoPasteEnabled, forKey: Keys.autoPasteEnabled) }
@@ -104,6 +116,8 @@ final class FormattingSettings: @unchecked Sendable {
         autoPasteEnabled = defaults.object(forKey: Keys.autoPasteEnabled) as? Bool ?? true
         skipShortDictations = defaults.object(forKey: Keys.skipShortDictations) as? Bool ?? false
         formattingWordThreshold = defaults.object(forKey: Keys.formattingWordThreshold) as? Int ?? 3
+        provider = defaults.string(forKey: Keys.formattingProvider).flatMap(FormattingProvider.init) ?? .default
+        groqModel = defaults.string(forKey: Keys.groqModel).flatMap(GroqModel.init) ?? .default
         if let saved = defaults.string(forKey: Keys.dictionaryJSON) {
             do {
                 dictionaryEntries = try DictionaryEntry.parse(saved)
