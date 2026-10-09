@@ -36,7 +36,9 @@ public protocol TextFormatting: AnyObject {
     /// pipeline delivers the raw transcript without calling `format(raw:)`.
     /// Default implementation always returns true.
     func shouldFormat(wordCount: Int) -> Bool
-    func format(raw: String) async -> String?
+    /// Formats `raw`, reporting which model ran and what it cost. A nil `text` means the
+    /// attempt failed and the raw transcript should be delivered.
+    func format(raw: String) async -> FormattingOutcome
 }
 
 public extension TextFormatting {

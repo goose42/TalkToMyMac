@@ -83,6 +83,8 @@ final class MockTranscriber: SpeechTranscribing {
 
 final class MockFormatter: TextFormatting {
     var formatResult: String?
+    var model = FormattingModel.groq(.gptOss20b)
+    var usage: TokenUsage?
     var formatCallCount = 0
     var lastInput: String?
     var shouldFormatResult = true
@@ -97,10 +99,10 @@ final class MockFormatter: TextFormatting {
         return shouldFormatResult
     }
 
-    func format(raw: String) async -> String? {
+    func format(raw: String) async -> FormattingOutcome {
         formatCallCount += 1
         lastInput = raw
-        return formatResult
+        return FormattingOutcome(model: model, text: formatResult, usage: usage)
     }
 }
 
@@ -437,6 +439,38 @@ final class RecorderControllerTests: XCTestCase {
         XCTAssertEqual(result?.llmApplied, false)
         // The attempt was still timed, so slow failures (e.g. timeouts) show up in metrics.
         XCTAssertNotNil(result?.formattingDuration)
+    }
+
+    func testProcessRecordingReportsFormatterModelAndUsage() async {
+        let transcriber = MockTranscriber(result: "hello world")
+        let formatter = MockFormatter(result: "Hello, world.")
+        formatter.usage = TokenUsage(input: 120, output: 30, reasoning: 12, cached: 0)
+        let (ctrl, _, _, _) = makeController(transcriber: transcriber, formatter: formatter)
+        let result = await ctrl.processRecording(samples: [1.0], sampleRate: 16000)
+        XCTAssertEqual(result?.formattingModel, .groq(.gptOss20b))
+        XCTAssertEqual(result?.tokenUsage, TokenUsage(input: 120, output: 30, reasoning: 12, cached: 0))
+    }
+
+    func testProcessRecordingFailedAttemptStillReportsModelAndUsage() async {
+        // A remote call can be billed even when its output is unusable.
+        let transcriber = MockTranscriber(result: "hello world")
+        let formatter = MockFormatter(result: nil)
+        formatter.usage = TokenUsage(input: 120, output: 2048, reasoning: 2048, cached: 0)
+        let (ctrl, _, _, _) = makeController(transcriber: transcriber, formatter: formatter)
+        let result = await ctrl.processRecording(samples: [1.0], sampleRate: 16000)
+        XCTAssertEqual(result?.llmApplied, false)
+        XCTAssertEqual(result?.formattingModel, .groq(.gptOss20b))
+        XCTAssertEqual(result?.tokenUsage?.output, 2048)
+    }
+
+    func testProcessRecordingSkippedFormatterHasNoModel() async {
+        let transcriber = MockTranscriber(result: "no")
+        let formatter = MockFormatter(result: "No.")
+        formatter.shouldFormatResult = false
+        let (ctrl, _, _, _) = makeController(transcriber: transcriber, formatter: formatter)
+        let result = await ctrl.processRecording(samples: [1.0], sampleRate: 16000)
+        XCTAssertNil(result?.formattingModel)
+        XCTAssertNil(result?.tokenUsage)
     }
 
     func testProcessRecordingWithoutFormatterHasNoFormattingDuration() async {

@@ -41,7 +41,7 @@ final class GroqResponsesTests: XCTestCase {
     // MARK: Response parsing
 
     private func parse(_ json: String) throws -> String {
-        try GroqResponses.parseOutputText(Data(json.utf8))
+        try GroqResponses.parse(Data(json.utf8)).text
     }
 
     func testParsesMessageTextSkippingReasoning() throws {
@@ -54,6 +54,48 @@ final class GroqResponsesTests: XCTestCase {
         ]}
         """
         XCTAssertEqual(try parse(json), "Hello, world.")
+    }
+
+    func testParsesTokenUsage() throws {
+        let json = """
+        {"status": "completed", "output": [
+          {"type": "message", "content": [{"type": "output_text", "text": "Hi."}]}
+        ], "usage": {"input_tokens": 82, "input_tokens_details": {"cached_tokens": 10},
+                     "output_tokens": 266, "output_tokens_details": {"reasoning_tokens": 200},
+                     "total_tokens": 348}}
+        """
+        let output = try GroqResponses.parse(Data(json.utf8))
+        XCTAssertEqual(output.usage, TokenUsage(input: 82, output: 266, reasoning: 200, cached: 10))
+    }
+
+    func testMissingUsageDetailsDefaultToZero() throws {
+        let json = """
+        {"status": "completed", "output": [
+          {"type": "message", "content": [{"type": "output_text", "text": "Hi."}]}
+        ], "usage": {"input_tokens": 5, "output_tokens": 7}}
+        """
+        XCTAssertEqual(try GroqResponses.parse(Data(json.utf8)).usage,
+                       TokenUsage(input: 5, output: 7, reasoning: 0, cached: 0))
+    }
+
+    func testMissingUsageIsNil() throws {
+        let json = """
+        {"status": "completed", "output": [
+          {"type": "message", "content": [{"type": "output_text", "text": "Hi."}]}
+        ]}
+        """
+        XCTAssertNil(try GroqResponses.parse(Data(json.utf8)).usage)
+    }
+
+    func testUsageReadableFromIncompleteResponse() {
+        // A response cut off at max_output_tokens is still billed.
+        let json = """
+        {"status": "incomplete", "output": [], "usage": {"input_tokens": 90, "output_tokens": 2048,
+         "output_tokens_details": {"reasoning_tokens": 2048}}}
+        """
+        XCTAssertEqual(GroqResponses.usage(in: Data(json.utf8)),
+                       TokenUsage(input: 90, output: 2048, reasoning: 2048, cached: 0))
+        XCTAssertNil(GroqResponses.usage(in: Data("not json".utf8)))
     }
 
     func testJoinsMultipleTextParts() throws {
@@ -109,5 +151,14 @@ final class GroqResponsesTests: XCTestCase {
 
     func testProviderDefaultsToOnDevice() {
         XCTAssertEqual(FormattingProvider.default, .appleOnDevice)
+    }
+
+    func testFormattingModelIdentity() {
+        let groq = FormattingModel.groq(.gptOss20b)
+        XCTAssertEqual(groq.provider, .groq)
+        XCTAssertEqual(groq.modelID, "openai/gpt-oss-20b")
+        XCTAssertTrue(groq.isRemote)
+        XCTAssertFalse(FormattingModel.appleOnDevice.isRemote)
+        XCTAssertEqual(FormattingModel.appleOnDevice.provider, .appleOnDevice)
     }
 }

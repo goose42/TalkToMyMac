@@ -1,21 +1,5 @@
 import Foundation
 
-/// Which model formats transcripts.
-public enum FormattingProvider: String, CaseIterable, Hashable, Sendable {
-    case appleOnDevice
-    case groq
-
-    /// The provider selected on first launch — on-device, so nothing leaves the Mac by default.
-    public static let `default`: FormattingProvider = .appleOnDevice
-
-    public var displayName: String {
-        switch self {
-        case .appleOnDevice: return "Apple Intelligence (on-device)"
-        case .groq:          return "Groq"
-        }
-    }
-}
-
 /// Models offered for Groq formatting. The raw value is Groq's model ID.
 public enum GroqModel: String, CaseIterable, Hashable, Sendable {
     case gptOss20b = "openai/gpt-oss-20b"
@@ -67,9 +51,15 @@ public enum GroqResponses {
         return request
     }
 
-    /// The assistant's text: every `output_text` part of every message item, joined.
-    /// Reasoning items (which gpt-oss models emit) are skipped.
-    public static func parseOutputText(_ data: Data) throws -> String {
+    /// A successful response: the assistant's text and the tokens it cost.
+    public struct Output: Equatable, Sendable {
+        public let text: String
+        public let usage: TokenUsage?
+    }
+
+    /// The assistant's text — every `output_text` part of every message item, joined;
+    /// reasoning items (which gpt-oss models emit) are skipped — and the reported usage.
+    public static func parse(_ data: Data) throws -> Output {
         let response = try JSONDecoder().decode(ResponseBody.self, from: data)
         if let message = response.error?.message {
             throw GroqError.api(message)
@@ -83,7 +73,13 @@ public enum GroqResponses {
             .filter { $0.type == "output_text" }
             .compactMap(\.text)
         guard !parts.isEmpty else { throw GroqError.noText }
-        return parts.joined()
+        return Output(text: parts.joined(), usage: response.usage?.tokenUsage)
+    }
+
+    /// The usage a response reports, whether or not it succeeded — failed calls can still
+    /// be billed. Nil if the body isn't a response or carries no usage.
+    public static func usage(in data: Data) -> TokenUsage? {
+        (try? JSONDecoder().decode(ResponseBody.self, from: data))?.usage?.tokenUsage
     }
 
     private struct RequestBody: Encodable {
@@ -111,8 +107,36 @@ public enum GroqResponses {
             let type: String
             let text: String?
         }
+        struct Usage: Decodable {
+            struct InputDetails: Decodable {
+                let cachedTokens: Int?
+                enum CodingKeys: String, CodingKey { case cachedTokens = "cached_tokens" }
+            }
+            struct OutputDetails: Decodable {
+                let reasoningTokens: Int?
+                enum CodingKeys: String, CodingKey { case reasoningTokens = "reasoning_tokens" }
+            }
+            let inputTokens: Int
+            let outputTokens: Int
+            let inputTokensDetails: InputDetails?
+            let outputTokensDetails: OutputDetails?
+
+            enum CodingKeys: String, CodingKey {
+                case inputTokens = "input_tokens"
+                case outputTokens = "output_tokens"
+                case inputTokensDetails = "input_tokens_details"
+                case outputTokensDetails = "output_tokens_details"
+            }
+
+            var tokenUsage: TokenUsage {
+                TokenUsage(input: inputTokens, output: outputTokens,
+                           reasoning: outputTokensDetails?.reasoningTokens ?? 0,
+                           cached: inputTokensDetails?.cachedTokens ?? 0)
+            }
+        }
         let status: String?
         let error: APIError?
         let output: [Item]?
+        let usage: Usage?
     }
 }

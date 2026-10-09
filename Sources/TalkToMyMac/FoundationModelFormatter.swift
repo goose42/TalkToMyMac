@@ -3,7 +3,7 @@ import TalkToMyMacCore
 
 /// Formats a raw transcript using Apple's on-device Foundation Models
 /// (`SystemLanguageModel`). Any failure — the model being unavailable, a guardrail
-/// refusal, a timeout, or a thrown `GenerationError` — returns `nil` rather than throwing,
+/// refusal, a timeout, or a thrown `GenerationError` — yields no text rather than throwing,
 /// so `RecorderController.processRecording` falls back to delivering the raw transcript.
 /// `@unchecked Sendable`: shared between the main-actor Settings UI (reads `availability`)
 /// and the non-isolated `RecorderController` pipeline (calls `format(raw:)`). `model` and
@@ -25,8 +25,11 @@ final class FoundationModelFormatter: TextFormatting, @unchecked Sendable {
         self.responseTimeout = responseTimeout
     }
 
-    func format(raw: String) async -> String? {
-        guard settings.isEnabled else { return nil }
+    func format(raw: String) async -> FormattingOutcome {
+        FormattingOutcome(model: .appleOnDevice, text: await formattedText(raw: raw))
+    }
+
+    private func formattedText(raw: String) async -> String? {
         guard case .available = model.availability else {
             print("[FoundationModelFormatter] Model unavailable: \(model.availability)")
             return nil

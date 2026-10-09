@@ -22,6 +22,7 @@ final class FormattingSettings: @unchecked Sendable {
         static let dictionaryFolderPath = "dictionaryFolderPath"
         static let formattingProvider = "formattingProvider"
         static let groqModel = "groqModel"
+        static let tokenPrices = "tokenPrices"
         /// Plain word list from the first, unreleased version of the dictionary; migrated
         /// into `dictionaryJSON` on launch.
         static let legacyDictionaryWords = "dictionaryWords"
@@ -86,6 +87,14 @@ final class FormattingSettings: @unchecked Sendable {
         didSet { UserDefaults.standard.set(groqModel.rawValue, forKey: Keys.groqModel) }
     }
 
+    /// Prices the user set for remote models, keyed by model ID. Models without an entry use
+    /// their provider's list price; see `price(for:)`.
+    private(set) var tokenPrices: [String: TokenPrice] {
+        didSet {
+            UserDefaults.standard.set(try? JSONEncoder().encode(tokenPrices), forKey: Keys.tokenPrices)
+        }
+    }
+
     /// Whether a successful transcript should be pasted at the cursor automatically.
     var autoPasteEnabled: Bool {
         didSet { UserDefaults.standard.set(autoPasteEnabled, forKey: Keys.autoPasteEnabled) }
@@ -118,6 +127,8 @@ final class FormattingSettings: @unchecked Sendable {
         formattingWordThreshold = defaults.object(forKey: Keys.formattingWordThreshold) as? Int ?? 3
         provider = defaults.string(forKey: Keys.formattingProvider).flatMap(FormattingProvider.init) ?? .default
         groqModel = defaults.string(forKey: Keys.groqModel).flatMap(GroqModel.init) ?? .default
+        tokenPrices = defaults.data(forKey: Keys.tokenPrices)
+            .flatMap { try? JSONDecoder().decode([String: TokenPrice].self, from: $0) } ?? [:]
         if let saved = defaults.string(forKey: Keys.dictionaryJSON) {
             do {
                 dictionaryEntries = try DictionaryEntry.parse(saved)
@@ -156,6 +167,27 @@ final class FormattingSettings: @unchecked Sendable {
 
     private var baseInstructions: String {
         customInstructions.isEmpty ? (PromptPreset.default.instructions ?? "") : customInstructions
+    }
+
+    // MARK: Token prices
+
+    /// What `model` costs per token: the user's price if they set one, else the provider's
+    /// list price. Nil for on-device models and remote models with no known price.
+    func price(for model: FormattingModel) -> TokenPrice? {
+        if let saved = tokenPrices[model.modelID] { return saved }
+        switch model.provider {
+        case .appleOnDevice: return nil
+        case .groq:          return GroqModel(rawValue: model.modelID)?.listPrice
+        }
+    }
+
+    func setPrice(_ price: TokenPrice, for model: FormattingModel) {
+        tokenPrices[model.modelID] = price
+    }
+
+    /// Drops the user's price for `model`, going back to the list price.
+    func resetPrice(for model: FormattingModel) {
+        tokenPrices[model.modelID] = nil
     }
 
     /// Restores the text editor to the selected preset's built-in text.

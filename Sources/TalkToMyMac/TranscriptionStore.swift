@@ -19,6 +19,10 @@ struct DictationMetrics {
     let rawWordCount: Int
     let formattedWordCount: Int
     let wordsChanged: Int
+    /// The model formatting was attempted with; nil if it wasn't attempted.
+    let formattingModel: FormattingModel?
+    /// Tokens a remote model reported; nil for on-device models and unmetered failures.
+    let tokenUsage: TokenUsage?
 }
 
 /// Persists transcription history and pipeline metrics in a SQLite database.
@@ -28,7 +32,8 @@ struct DictationMetrics {
 /// - `raw_transcriptions` — exactly what the speech-to-text model produced.
 /// - `formatted_transcriptions` — what was delivered after the LLM step (the raw text
 ///   unchanged if the LLM was off or failed).
-/// - `transcription_metrics` — timings and word counts for the run.
+/// - `transcription_metrics` — timings, word counts, the formatting model, and (for remote
+///   models) token usage for the run.
 final class TranscriptionStore {
     /// Posted on the main queue after a dictation is recorded.
     static let didChangeNotification = Notification.Name("TranscriptionStoreDidChange")
@@ -86,7 +91,13 @@ final class TranscriptionStore {
                 llm_applied INTEGER NOT NULL,     -- 0 if the LLM was off, failed, or timed out
                 raw_word_count INTEGER NOT NULL,
                 formatted_word_count INTEGER NOT NULL,
-                words_changed INTEGER NOT NULL    -- word-level edit distance, raw → formatted
+                words_changed INTEGER NOT NULL,   -- word-level edit distance, raw → formatted
+                formatting_provider TEXT,         -- NULL when formatting wasn't attempted
+                formatting_model TEXT,
+                input_tokens INTEGER,             -- NULL unless a remote model reported usage
+                output_tokens INTEGER,            -- includes reasoning_tokens
+                reasoning_tokens INTEGER,
+                cached_tokens INTEGER             -- part of input_tokens
             );
             """
         if sqlite3_exec(db, createSQL, nil, nil, nil) != SQLITE_OK {
@@ -94,6 +105,7 @@ final class TranscriptionStore {
         }
 
         migrateLegacyTable()
+        addFormattingModelColumns()
     }
 
     deinit {
@@ -117,6 +129,33 @@ final class TranscriptionStore {
             sqlite3_exec(db, "ROLLBACK;", nil, nil, nil)
         } else {
             print("[TranscriptionStore] Migrated legacy transcriptions table")
+        }
+    }
+
+    /// Metrics tables created before formatting could run on a remote model lack the model
+    /// and token columns. Add them, and attribute earlier formatting attempts to the
+    /// on-device model — the only one there was. Runs once; a no-op afterwards.
+    private func addFormattingModelColumns() {
+        guard !columnExists("formatting_provider", in: Table.metrics.rawValue) else { return }
+        let sql = """
+            BEGIN;
+            ALTER TABLE transcription_metrics ADD COLUMN formatting_provider TEXT;
+            ALTER TABLE transcription_metrics ADD COLUMN formatting_model TEXT;
+            ALTER TABLE transcription_metrics ADD COLUMN input_tokens INTEGER;
+            ALTER TABLE transcription_metrics ADD COLUMN output_tokens INTEGER;
+            ALTER TABLE transcription_metrics ADD COLUMN reasoning_tokens INTEGER;
+            ALTER TABLE transcription_metrics ADD COLUMN cached_tokens INTEGER;
+            UPDATE transcription_metrics
+                SET formatting_provider = '\(FormattingModel.appleOnDevice.provider.rawValue)',
+                    formatting_model = '\(FormattingModel.appleOnDevice.modelID)'
+                WHERE formatting_ms IS NOT NULL;
+            COMMIT;
+            """
+        if sqlite3_exec(db, sql, nil, nil, nil) != SQLITE_OK {
+            print("[TranscriptionStore] Adding formatting model columns failed: \(errorMessage)")
+            sqlite3_exec(db, "ROLLBACK;", nil, nil, nil)
+        } else {
+            print("[TranscriptionStore] Added formatting model columns")
         }
     }
 
@@ -149,8 +188,10 @@ final class TranscriptionStore {
                 """
                 INSERT INTO transcription_metrics (
                     id, timestamp, audio_seconds, transcription_ms, formatting_ms, llm_applied,
-                    raw_word_count, formatted_word_count, words_changed
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+                    raw_word_count, formatted_word_count, words_changed,
+                    formatting_provider, formatting_model,
+                    input_tokens, output_tokens, reasoning_tokens, cached_tokens
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
                 """,
                 [
                     .text(id),
@@ -162,6 +203,12 @@ final class TranscriptionStore {
                     .int(WordDiff.wordCount(result.rawText)),
                     .int(WordDiff.wordCount(result.finalText)),
                     .int(WordDiff.changedWords(from: result.rawText, to: result.finalText)),
+                    result.formattingModel.map { .text($0.provider.rawValue) } ?? .null,
+                    result.formattingModel.map { .text($0.modelID) } ?? .null,
+                    result.tokenUsage.map { .int($0.input) } ?? .null,
+                    result.tokenUsage.map { .int($0.output) } ?? .null,
+                    result.tokenUsage.map { .int($0.reasoning) } ?? .null,
+                    result.tokenUsage.map { .int($0.cached) } ?? .null,
                 ]
             )
 
@@ -214,7 +261,9 @@ final class TranscriptionStore {
 
         let sql = """
             SELECT timestamp, audio_seconds, transcription_ms, formatting_ms, llm_applied,
-                   raw_word_count, formatted_word_count, words_changed
+                   raw_word_count, formatted_word_count, words_changed,
+                   formatting_provider, formatting_model,
+                   input_tokens, output_tokens, reasoning_tokens, cached_tokens
             FROM transcription_metrics WHERE timestamp >= ? ORDER BY timestamp;
             """
         var stmt: OpaquePointer?
@@ -236,10 +285,32 @@ final class TranscriptionStore {
                 llmApplied: sqlite3_column_int(stmt, 4) != 0,
                 rawWordCount: Int(sqlite3_column_int64(stmt, 5)),
                 formattedWordCount: Int(sqlite3_column_int64(stmt, 6)),
-                wordsChanged: Int(sqlite3_column_int64(stmt, 7))
+                wordsChanged: Int(sqlite3_column_int64(stmt, 7)),
+                formattingModel: Self.formattingModel(stmt, provider: 8, model: 9),
+                tokenUsage: Self.tokenUsage(stmt, firstColumn: 10)
             ))
         }
         return results
+    }
+
+    /// The model in a row's provider/model columns; nil if formatting wasn't attempted or
+    /// the provider is one this version doesn't know.
+    private static func formattingModel(_ stmt: OpaquePointer?, provider: Int32, model: Int32) -> FormattingModel? {
+        guard let providerText = text(stmt, provider), let modelText = text(stmt, model),
+              let provider = FormattingProvider(rawValue: providerText) else { return nil }
+        return FormattingModel(provider: provider, modelID: modelText)
+    }
+
+    /// Usage from the four token columns starting at `firstColumn`; nil if none was recorded.
+    private static func tokenUsage(_ stmt: OpaquePointer?, firstColumn: Int32) -> TokenUsage? {
+        guard sqlite3_column_type(stmt, firstColumn) != SQLITE_NULL else { return nil }
+        let int = { (offset: Int32) in Int(sqlite3_column_int64(stmt, firstColumn + offset)) }
+        return TokenUsage(input: int(0), output: int(1), reasoning: int(2), cached: int(3))
+    }
+
+    private static func text(_ stmt: OpaquePointer?, _ column: Int32) -> String? {
+        guard let cString = sqlite3_column_text(stmt, column) else { return nil }
+        return String(cString: cString)
     }
 
     // MARK: - Storage
@@ -355,6 +426,17 @@ final class TranscriptionStore {
         }
         defer { sqlite3_finalize(stmt) }
         sqlite3_bind_text(stmt, 1, (name as NSString).utf8String, -1, Self.transient)
+        return sqlite3_step(stmt) == SQLITE_ROW
+    }
+
+    private func columnExists(_ column: String, in table: String) -> Bool {
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "SELECT 1 FROM pragma_table_info(?) WHERE name = ?;", -1, &stmt, nil) == SQLITE_OK else {
+            return false
+        }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_text(stmt, 1, (table as NSString).utf8String, -1, Self.transient)
+        sqlite3_bind_text(stmt, 2, (column as NSString).utf8String, -1, Self.transient)
         return sqlite3_step(stmt) == SQLITE_ROW
     }
 

@@ -77,7 +77,7 @@ final class SettingsWindowController {
         tabs.addTabViewItem(Self.tab(
             "Instrumentation",
             symbol: "gauge.with.dots.needle.bottom.50percent",
-            InstrumentationView(store: transcriptionStore)
+            InstrumentationView(store: transcriptionStore, settings: settings)
         ))
         tabs.addTabViewItem(Self.tab(
             "Storage",
@@ -97,8 +97,9 @@ final class SettingsWindowController {
         self.window = win
     }
 
-    /// All tabs share one size, so switching tabs doesn't resize the window.
-    private static let contentSize = NSSize(width: 500, height: 720)
+    /// All tabs share one size, so switching tabs doesn't resize the window. Wide enough
+    /// for all seven toolbar tabs to show without an overflow menu.
+    private static let contentSize = NSSize(width: 780, height: 800)
 
     private static func tab(_ label: String, symbol: String, _ view: some View) -> NSTabViewItem {
         let controller = NSHostingController(rootView: view)

@@ -74,18 +74,26 @@ public struct PipelineResult: Equatable, Sendable {
     /// Time spent in the formatter, including a failed or timed-out attempt. `nil` when no
     /// formatter is configured at all.
     public let formattingDuration: Duration?
+    /// The model formatting was attempted with; nil if it wasn't attempted.
+    public let formattingModel: FormattingModel?
+    /// Tokens the formatting model reported (remote models only), even for a failed attempt.
+    public let tokenUsage: TokenUsage?
 
     public init(
         rawText: String,
         finalText: String,
         llmApplied: Bool,
         transcriptionDuration: Duration,
-        formattingDuration: Duration?
+        formattingDuration: Duration?,
+        formattingModel: FormattingModel? = nil,
+        tokenUsage: TokenUsage? = nil
     ) {
         self.rawText = rawText
         self.finalText = finalText
         self.llmApplied = llmApplied
         self.transcriptionDuration = transcriptionDuration
         self.formattingDuration = formattingDuration
+        self.formattingModel = formattingModel
+        self.tokenUsage = tokenUsage
     }
 }

@@ -141,13 +141,14 @@ public class RecorderController: @unchecked Sendable {
 
         // 3. Format (optional — falls back to raw text on any failure, and skipped entirely
         //    when the formatter declines a transcript this short)
-        var formattedText: String?
+        var outcome: FormattingOutcome?
         var formattingDuration: Duration?
         if let formatter, formatter.shouldFormat(wordCount: WordDiff.wordCount(rawText)) {
             let formatStart = clock.now
-            formattedText = await formatter.format(raw: rawText)
+            outcome = await formatter.format(raw: rawText)
             formattingDuration = clock.now - formatStart
         }
+        let formattedText = outcome?.text
         let finalText = formattedText ?? rawText
 
         // 4. Deliver (optional — failure is non-fatal)
@@ -160,7 +161,9 @@ public class RecorderController: @unchecked Sendable {
             finalText: finalText,
             llmApplied: formattedText != nil,
             transcriptionDuration: transcriptionDuration,
-            formattingDuration: formattingDuration
+            formattingDuration: formattingDuration,
+            formattingModel: outcome?.model,
+            tokenUsage: outcome?.usage
         )
     }
 }
