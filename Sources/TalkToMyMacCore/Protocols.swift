@@ -52,3 +52,9 @@ public protocol OutputDelivering: AnyObject {
 public protocol AudioDenoising: AnyObject {
     func denoise(samples: [Float]) -> [Float]
 }
+
+/// Fills in a dictionary entry's fields (type, sound-alikes, context…) from just its written
+/// form, e.g. with an on-device LLM. Returns nil if no suggestion could be produced.
+public protocol DictionaryEntryGenerating: Sendable {
+    func suggestEntry(for written: String) async -> DictionaryEntry?
+}

@@ -14,6 +14,7 @@ final class SettingsWindowController {
     private let shortcuts: ShortcutManager
     private let transcriptionStore: TranscriptionStore
     private let floatingIndicator: FloatingIndicatorController
+    private let dictionaryEditor: DictionaryEditor
 
     init(speechService: SpeechTranscriptionService, formatter: FoundationModelFormatter,
          settings: FormattingSettings, shortcuts: ShortcutManager, transcriptionStore: TranscriptionStore,
@@ -24,6 +25,12 @@ final class SettingsWindowController {
         self.shortcuts = shortcuts
         self.transcriptionStore = transcriptionStore
         self.floatingIndicator = floatingIndicator
+        self.dictionaryEditor = DictionaryEditor(
+            entries: settings.dictionaryEntries,
+            generator: FoundationModelEntryGenerator()
+        ) { [settings] entries in
+            settings.dictionaryEntries = entries
+        }
     }
 
     func showWindow() {
@@ -44,6 +51,11 @@ final class SettingsWindowController {
             symbol: "gearshape",
             SettingsView(speechService: speechService, settings: settings,
                          shortcuts: shortcuts, floatingIndicator: floatingIndicator)
+        ))
+        tabs.addTabViewItem(Self.tab(
+            "Dictionary",
+            symbol: "character.book.closed",
+            DictionaryView(editor: dictionaryEditor, settings: settings)
         ))
         tabs.addTabViewItem(Self.tab(
             "Formatting",

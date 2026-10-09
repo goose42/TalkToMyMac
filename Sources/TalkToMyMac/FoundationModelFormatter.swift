@@ -41,14 +41,7 @@ final class FoundationModelFormatter: TextFormatting, @unchecked Sendable {
 
         // A fresh session per dictation — no context should bleed between utterances.
         let session = LanguageModelSession(model: model, instructions: settings.resolvedInstructions)
-        let prompt = """
-        Reformat the dictated text between the tags below. Output only the reformatted \
-        text, with no preamble, quotation marks, or explanation.
-
-        <text>
-        \(raw)
-        </text>
-        """
+        let prompt = FormattingInstructions.userPrompt(transcript: raw)
         let options = GenerationOptions(temperature: 0.2, maximumResponseTokens: 2048)
 
         guard let content = await respondWithTimeout(session: session, prompt: prompt, options: options) else {

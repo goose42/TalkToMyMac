@@ -18,6 +18,10 @@ final class FormattingSettings: @unchecked Sendable {
         static let autoPasteEnabled = "autoPasteEnabled"
         static let skipShortDictations = "skipShortDictations"
         static let formattingWordThreshold = "formattingWordThreshold"
+        static let dictionaryJSON = "dictionaryJSON"
+        /// Plain word list from the first, unreleased version of the dictionary; migrated
+        /// into `dictionaryJSON` on launch.
+        static let legacyDictionaryWords = "dictionaryWords"
     }
 
     /// Whether the LLM formatting step runs at all. When false, `processRecording` delivers
@@ -53,6 +57,12 @@ final class FormattingSettings: @unchecked Sendable {
         didSet { UserDefaults.standard.set(formattingWordThreshold, forKey: Keys.formattingWordThreshold) }
     }
 
+    /// The custom dictionary: terms the speech model tends to mis-hear. Persisted as a JSON
+    /// array (the same shape the formatting prompt receives).
+    var dictionaryEntries: [DictionaryEntry] {
+        didSet { UserDefaults.standard.set(DictionaryEntry.encode(dictionaryEntries), forKey: Keys.dictionaryJSON) }
+    }
+
     /// Whether a successful transcript should be pasted at the cursor automatically.
     var autoPasteEnabled: Bool {
         didSet { UserDefaults.standard.set(autoPasteEnabled, forKey: Keys.autoPasteEnabled) }
@@ -69,7 +79,7 @@ final class FormattingSettings: @unchecked Sendable {
         if let raw = defaults.string(forKey: Keys.promptPreset), let saved = PromptPreset(rawValue: raw) {
             resolvedPreset = saved
         } else {
-            resolvedPreset = .cleanUp
+            resolvedPreset = .default
         }
 
         let resolvedCustomInstructions: String
@@ -83,15 +93,42 @@ final class FormattingSettings: @unchecked Sendable {
         autoPasteEnabled = defaults.object(forKey: Keys.autoPasteEnabled) as? Bool ?? true
         skipShortDictations = defaults.object(forKey: Keys.skipShortDictations) as? Bool ?? false
         formattingWordThreshold = defaults.object(forKey: Keys.formattingWordThreshold) as? Int ?? 3
+        if let saved = defaults.string(forKey: Keys.dictionaryJSON) {
+            do {
+                dictionaryEntries = try DictionaryEntry.parse(saved)
+            } catch {
+                print("[FormattingSettings] Ignoring unreadable dictionary: \(error)")
+                dictionaryEntries = []
+            }
+        } else if let words = defaults.stringArray(forKey: Keys.legacyDictionaryWords) {
+            // `didSet` doesn't run during init, so persist the migrated entries explicitly.
+            let migrated = words.map { DictionaryEntry(written: $0, type: .noun) }
+            defaults.set(DictionaryEntry.encode(migrated), forKey: Keys.dictionaryJSON)
+            defaults.removeObject(forKey: Keys.legacyDictionaryWords)
+            dictionaryEntries = migrated
+        } else {
+            dictionaryEntries = []
+        }
         preset = resolvedPreset
         customInstructions = resolvedCustomInstructions
     }
 
-    /// The system prompt actually sent to the model. Falls back to the Clean Up preset if
+    /// The system prompt actually sent to the model. Falls back to the default preset if
     /// the editor is somehow empty (e.g. `.custom` selected with nothing typed yet), rather
-    /// than sending an empty instructions string.
+    /// than sending an empty instructions string. The custom dictionary is inserted at the
+    /// prompt's `{{DICTIONARY}}` placeholder, or appended if it has none.
     var resolvedInstructions: String {
-        customInstructions.isEmpty ? (PromptPreset.cleanUp.instructions ?? "") : customInstructions
+        FormattingInstructions.compose(base: baseInstructions, dictionary: dictionaryEntries)
+    }
+
+    /// Whether the active instructions place the dictionary themselves (and so carry the
+    /// full dictionary rules), rather than getting the short appended version.
+    var resolvedInstructionsHavePlaceholder: Bool {
+        baseInstructions.contains(FormattingInstructions.dictionaryPlaceholder)
+    }
+
+    private var baseInstructions: String {
+        customInstructions.isEmpty ? (PromptPreset.default.instructions ?? "") : customInstructions
     }
 
     /// Restores the text editor to the selected preset's built-in text.
