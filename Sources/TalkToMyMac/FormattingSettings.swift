@@ -19,6 +19,7 @@ final class FormattingSettings: @unchecked Sendable {
         static let skipShortDictations = "skipShortDictations"
         static let formattingWordThreshold = "formattingWordThreshold"
         static let dictionaryJSON = "dictionaryJSON"
+        static let dictionaryFolderPath = "dictionaryFolderPath"
         /// Plain word list from the first, unreleased version of the dictionary; migrated
         /// into `dictionaryJSON` on launch.
         static let legacyDictionaryWords = "dictionaryWords"
@@ -58,10 +59,20 @@ final class FormattingSettings: @unchecked Sendable {
     }
 
     /// The custom dictionary: terms the speech model tends to mis-hear. Persisted as a JSON
-    /// array (the same shape the formatting prompt receives).
+    /// array (the same shape the formatting prompt receives) in UserDefaults and, when a
+    /// folder is chosen, in its `dictionary.json`.
     var dictionaryEntries: [DictionaryEntry] {
-        didSet { UserDefaults.standard.set(DictionaryEntry.encode(dictionaryEntries), forKey: Keys.dictionaryJSON) }
+        didSet { persistDictionary() }
     }
+
+    /// Where `dictionary.json` lives, e.g. a folder in iCloud Drive. When set, the file is the
+    /// source of truth: it's read at launch and rewritten on every change, and UserDefaults
+    /// only keeps a fallback copy. Nil keeps the dictionary in UserDefaults alone.
+    private(set) var dictionaryFolder: URL?
+
+    /// Why the folder's `dictionary.json` can't be used. While set, the file is left alone so
+    /// a hand edit or another Mac's copy isn't clobbered; `overwriteDictionaryFile()` resolves it.
+    private(set) var dictionaryFileError: String?
 
     /// Whether a successful transcript should be pasted at the cursor automatically.
     var autoPasteEnabled: Bool {
@@ -109,8 +120,10 @@ final class FormattingSettings: @unchecked Sendable {
         } else {
             dictionaryEntries = []
         }
+        dictionaryFolder = defaults.string(forKey: Keys.dictionaryFolderPath).map { URL(fileURLWithPath: $0) }
         preset = resolvedPreset
         customInstructions = resolvedCustomInstructions
+        reloadDictionaryFile()
     }
 
     /// The system prompt actually sent to the model. Falls back to the default preset if
@@ -134,5 +147,83 @@ final class FormattingSettings: @unchecked Sendable {
     /// Restores the text editor to the selected preset's built-in text.
     func resetCustomInstructionsToCurrentPreset() {
         customInstructions = preset.instructions ?? ""
+    }
+
+    // MARK: Dictionary file
+
+    /// Re-reads the folder's `dictionary.json`, which wins over the current entries; a missing
+    /// file is created from them. Returns the file's entries if they replaced the current ones.
+    @discardableResult
+    func reloadDictionaryFile() -> [DictionaryEntry]? {
+        guard case .loaded(let entries) = readDictionaryFile(), entries != dictionaryEntries else { return nil }
+        dictionaryEntries = entries
+        // `didSet` doesn't run when this is called from `init`.
+        persistDictionary()
+        return entries
+    }
+
+    /// Moves the dictionary to `folder`, or back to UserDefaults alone if nil. A dictionary
+    /// already in the folder is merged in: current entries first, then its new words.
+    /// Returns the resulting entries.
+    func useDictionaryFolder(_ folder: URL?) -> [DictionaryEntry] {
+        dictionaryFolder = folder
+        UserDefaults.standard.set(folder?.path, forKey: Keys.dictionaryFolderPath)
+        if case .loaded(let fileEntries) = readDictionaryFile() {
+            dictionaryEntries = DictionaryFile.merge(current: dictionaryEntries, file: fileEntries)
+        }
+        persistDictionary()
+        return dictionaryEntries
+    }
+
+    /// Replaces an unreadable `dictionary.json` with the current entries.
+    func overwriteDictionaryFile() {
+        dictionaryFileError = nil
+        persistDictionary()
+    }
+
+    private enum FileState {
+        case none
+        case loaded([DictionaryEntry])
+        case unusable
+    }
+
+    /// Reads the folder's file and updates `dictionaryFileError`. A missing file (and not
+    /// one iCloud has yet to download) is written from the current entries.
+    private func readDictionaryFile() -> FileState {
+        guard let folder = dictionaryFolder else {
+            dictionaryFileError = nil
+            return .none
+        }
+        let url = DictionaryFile.url(in: folder)
+        do {
+            if let entries = try DictionaryFile.load(from: url) {
+                dictionaryFileError = nil
+                return .loaded(entries)
+            }
+        } catch {
+            dictionaryFileError = "dictionary.json can't be read: \(error). "
+                + "Fix the file, or overwrite it with the words below."
+            return .unusable
+        }
+        if DictionaryFile.isAwaitingICloudDownload(in: folder) {
+            try? FileManager.default.startDownloadingUbiquitousItem(at: url)
+            dictionaryFileError = "dictionary.json is still downloading from iCloud. "
+                + "Reopen Settings once it's done, or overwrite it with the words below."
+            return .unusable
+        }
+        dictionaryFileError = nil
+        persistDictionary()
+        return .none
+    }
+
+    private func persistDictionary() {
+        let json = DictionaryEntry.encode(dictionaryEntries)
+        UserDefaults.standard.set(json, forKey: Keys.dictionaryJSON)
+        guard let folder = dictionaryFolder, dictionaryFileError == nil else { return }
+        do {
+            try DictionaryFile.save(dictionaryEntries, to: DictionaryFile.url(in: folder))
+        } catch {
+            dictionaryFileError = "Couldn't save dictionary.json: \(error.localizedDescription)"
+        }
     }
 }

@@ -1,5 +1,7 @@
+import AppKit
 import SwiftUI
 import TalkToMyMacCore
+import UniformTypeIdentifiers
 
 /// Settings tab for the custom dictionary: terms the speech model tends to mis-hear, passed
 /// to the LLM formatting step so it can correct them. Adding a word asks Apple Intelligence
@@ -10,6 +12,8 @@ struct DictionaryView: View {
     @Bindable var settings: FormattingSettings
     @State private var newWord = ""
     @State private var selection: UUID?
+    /// Outcome of the last import or export, shown under the Storage buttons.
+    @State private var transferMessage: String?
 
     var body: some View {
         if let selection, editor.item(selection) != nil {
@@ -55,6 +59,8 @@ struct DictionaryView: View {
                     .foregroundStyle(.secondary)
             }
 
+            storageSection
+
             Section("Words") {
                 if editor.items.isEmpty {
                     Text("No words yet.")
@@ -66,8 +72,134 @@ struct DictionaryView: View {
                 }
             }
         }
-        .padding(20)
+        // Grouped, like the other tabs: it scrolls, which a long word list needs (the default
+        // columns style doesn't, and clips everything past the window's fixed height).
+        .formStyle(.grouped)
         .frame(minWidth: 440)
+        .onAppear {
+            // Pick up edits made to the file elsewhere, e.g. on another Mac via iCloud.
+            if let entries = settings.reloadDictionaryFile() {
+                editor.replaceAll(entries)
+            }
+        }
+    }
+
+    // MARK: Storage
+
+    private var storageSection: some View {
+        Section {
+            LabeledContent("Folder") {
+                if let folder = settings.dictionaryFolder {
+                    Text((folder.path as NSString).abbreviatingWithTildeInPath)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .help(DictionaryFile.url(in: folder).path)
+                } else {
+                    Text("None — stored in app preferences")
+                        .foregroundStyle(.secondary)
+                }
+            }
+            HStack {
+                Button("Choose Folder…", action: chooseFolder)
+                if let folder = settings.dictionaryFolder {
+                    Button("Show in Finder") {
+                        let file = DictionaryFile.url(in: folder)
+                        if FileManager.default.fileExists(atPath: file.path) {
+                            NSWorkspace.shared.activateFileViewerSelecting([file])
+                        } else {
+                            NSWorkspace.shared.open(folder)
+                        }
+                    }
+                    Button("Stop Using Folder") {
+                        editor.replaceAll(settings.useDictionaryFolder(nil))
+                    }
+                }
+            }
+            if let error = settings.dictionaryFileError {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label(error, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.red)
+                        .font(.caption)
+                    Button("Overwrite File with Current Dictionary") { settings.overwriteDictionaryFile() }
+                }
+            }
+            HStack {
+                Button("Import…", action: importFile)
+                Button("Export…", action: exportFile)
+            }
+            if let transferMessage {
+                Text(transferMessage)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        } header: {
+            Text("Storage")
+        } footer: {
+            Text("With a folder chosen, the dictionary is kept in its dictionary.json and saved on "
+                 + "every change — pick one in iCloud Drive to back it up or share it between Macs. "
+                 + "Import takes an exported dictionary or a text file with one word per line.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func chooseFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.prompt = "Use Folder"
+        panel.message = "Choose where to keep dictionary.json. A dictionary already there is merged in."
+        panel.directoryURL = settings.dictionaryFolder ?? Self.iCloudDriveURL
+        guard panel.runModal() == .OK, let folder = panel.url else { return }
+        editor.replaceAll(settings.useDictionaryFolder(folder))
+    }
+
+    private func importFile() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.json, .plainText]
+        panel.prompt = "Import"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            let contents = try DictionaryFile.parseImport(String(contentsOf: url, encoding: .utf8))
+            let result = editor.import(contents)
+            var message = "Added \(Self.words(result.added))"
+            if result.skipped > 0 {
+                message += ", skipped \(result.skipped) already in the dictionary"
+            }
+            if result.added > 0, case .words = contents, editor.canGenerate {
+                message += ". Filling in details one word at a time…"
+            } else {
+                message += "."
+            }
+            transferMessage = message
+        } catch {
+            transferMessage = "Couldn't import \(url.lastPathComponent): \(error)"
+        }
+    }
+
+    private func exportFile() {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.json]
+        panel.nameFieldStringValue = DictionaryFile.fileName
+        panel.directoryURL = settings.dictionaryFolder ?? Self.iCloudDriveURL
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try DictionaryFile.save(editor.entries, to: url)
+            transferMessage = "Exported \(Self.words(editor.entries.count)) to \(url.lastPathComponent)."
+        } catch {
+            transferMessage = "Couldn't export: \(error.localizedDescription)"
+        }
+    }
+
+    private static func words(_ count: Int) -> String {
+        count == 1 ? "1 word" : "\(count) words"
+    }
+
+    private static var iCloudDriveURL: URL? {
+        let url = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Mobile Documents/com~apple~CloudDocs")
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }
 
     private func row(_ item: DictionaryEditor.Item) -> some View {

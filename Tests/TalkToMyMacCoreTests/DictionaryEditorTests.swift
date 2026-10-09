@@ -203,4 +203,127 @@ final class DictionaryEditorTests: XCTestCase {
         XCTAssertEqual(editor.items[0].status, .ready)
         XCTAssertFalse(editor.canGenerate)
     }
+
+    // MARK: Importing
+
+    func testImportEntriesKeepsTheirFieldsAndSkipsDuplicates() {
+        let generator = GatedEntryGenerator()
+        let editor = makeEditor(entries: [DictionaryEntry(written: "OTel", type: .acronym)], generator: generator)
+        let rest = DictionaryEntry(written: "REST", type: .acronym, soundsLike: ["rest"], context: "API")
+
+        let result = editor.import(.entries([
+            DictionaryEntry(written: "otel", type: .noun),
+            rest,
+            DictionaryEntry(written: "rest", type: .noun),
+        ]))
+
+        XCTAssertEqual(result, DictionaryEditor.ImportResult(added: 1, skipped: 2))
+        XCTAssertEqual(editor.entries, [DictionaryEntry(written: "OTel", type: .acronym), rest])
+        XCTAssertEqual(editor.items.map(\.status), [.ready, .ready], "Imported entries already have details")
+        XCTAssertTrue(generator.requested.isEmpty)
+        XCTAssertEqual(saved, [editor.entries], "One save for the whole import")
+    }
+
+    func testImportWordsAddsBareEntriesAndQueuesGeneration() async throws {
+        let generator = GatedEntryGenerator()
+        let editor = makeEditor(entries: [DictionaryEntry(written: "OTel", type: .acronym)], generator: generator)
+
+        let result = editor.import(.words(["otel", " REST ", "", "Wispr Flow"]))
+
+        XCTAssertEqual(result, DictionaryEditor.ImportResult(added: 2, skipped: 1))
+        XCTAssertEqual(editor.entries.map(\.written), ["OTel", "REST", "Wispr Flow"])
+        XCTAssertEqual(editor.items.map(\.status), [.ready, .generating, .generating])
+        XCTAssertEqual(saved.count, 1)
+
+        generator.release(nil)
+        generator.release(nil)
+        await editor.generationTasks[editor.items[2].id]?.value
+        XCTAssertEqual(generator.requested, ["REST", "Wispr Flow"], "Generated in import order")
+    }
+
+    func testImportOfNothingNewDoesNotSave() {
+        let editor = makeEditor(entries: [DictionaryEntry(written: "OTel", type: .acronym)])
+        XCTAssertEqual(editor.import(.words(["OTEL"])), DictionaryEditor.ImportResult(added: 0, skipped: 1))
+        XCTAssertTrue(saved.isEmpty)
+    }
+
+    // MARK: Generation queue
+
+    func testGenerationRunsOneWordAtATime() async throws {
+        let generator = ConcurrencyTrackingGenerator()
+        let editor = makeEditor(generator: generator)
+        editor.import(.words(["a", "b", "c", "d"]))
+
+        for item in editor.items { await editor.generationTasks[item.id]?.value }
+        XCTAssertEqual(generator.requested, ["a", "b", "c", "d"])
+        XCTAssertEqual(generator.maxInFlight, 1)
+    }
+
+    func testRemovingAQueuedWordSkipsItsGeneration() async throws {
+        let generator = GatedEntryGenerator()
+        let editor = makeEditor(generator: generator)
+        editor.import(.words(["a", "b", "c"]))
+        let b = editor.items[1].id
+        let c = editor.items[2].id
+
+        editor.remove(b)
+        generator.release(nil)
+        generator.release(nil)
+        await editor.generationTasks[c]?.value
+        XCTAssertEqual(generator.requested, ["a", "c"])
+    }
+
+    func testEditingAQueuedWordSkipsItsGeneration() async throws {
+        let generator = GatedEntryGenerator()
+        let editor = makeEditor(generator: generator)
+        editor.import(.words(["a", "b"]))
+        let b = editor.items[1].id
+
+        XCTAssertTrue(editor.update(b, to: DictionaryEntry(written: "b", type: .verb)))
+        XCTAssertEqual(editor.item(b)?.status, .ready)
+        generator.release(nil)
+        await editor.generationTasks[b]?.value
+        XCTAssertEqual(generator.requested, ["a"])
+        XCTAssertEqual(editor.item(b)?.entry.type, .verb)
+    }
+
+    // MARK: Replacing
+
+    func testReplaceAllSwapsEntriesWithoutSavingAndDropsPendingGeneration() async throws {
+        let generator = GatedEntryGenerator()
+        let editor = makeEditor(generator: generator)
+        let old = try XCTUnwrap(editor.add("OTel"))
+        saved.removeAll()
+
+        editor.replaceAll([DictionaryEntry(written: "REST", type: .acronym)])
+        XCTAssertEqual(editor.entries, [DictionaryEntry(written: "REST", type: .acronym)])
+        XCTAssertEqual(editor.items.map(\.status), [.ready])
+        XCTAssertTrue(saved.isEmpty, "The caller already has these entries")
+
+        generator.release(otelSuggestion)
+        await editor.generationTasks[old]?.value
+        XCTAssertEqual(editor.entries, [DictionaryEntry(written: "REST", type: .acronym)])
+    }
+}
+
+/// Answers after a short delay, recording how many requests overlapped.
+final class ConcurrencyTrackingGenerator: DictionaryEntryGenerating, @unchecked Sendable {
+    private let lock = NSLock()
+    private var _requested: [String] = []
+    private var inFlight = 0
+    private var _maxInFlight = 0
+
+    var requested: [String] { lock.withLock { _requested } }
+    var maxInFlight: Int { lock.withLock { _maxInFlight } }
+
+    func suggestEntry(for written: String) async -> DictionaryEntry? {
+        lock.withLock {
+            _requested.append(written)
+            inFlight += 1
+            _maxInFlight = max(_maxInFlight, inFlight)
+        }
+        try? await Task.sleep(for: .milliseconds(10))
+        lock.withLock { inFlight -= 1 }
+        return nil
+    }
 }

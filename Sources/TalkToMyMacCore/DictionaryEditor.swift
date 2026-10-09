@@ -25,6 +25,8 @@ public final class DictionaryEditor {
 
     /// In-flight generation per item, exposed for tests to await.
     @ObservationIgnored private(set) var generationTasks: [UUID: Task<Void, Never>] = [:]
+    /// The most recently queued request; the next one waits for it.
+    @ObservationIgnored private var lastGenerationTask: Task<Void, Never>?
     /// The request whose result an item is waiting for. A result is applied only if its
     /// token still matches — an edit or a newer request clears or replaces it.
     @ObservationIgnored private var pendingRequests: [UUID: UUID] = [:]
@@ -84,8 +86,60 @@ public final class DictionaryEditor {
         startGeneration(for: id)
     }
 
+    public struct ImportResult: Equatable, Sendable {
+        public var added: Int
+        /// Words already in the dictionary, or repeated in the import, ignoring case.
+        public var skipped: Int
+    }
+
+    /// Adds what the file holds, skipping words already present. Imported entries are kept
+    /// as they are; bare words are queued for generation. Saves once, if anything was added.
+    @discardableResult
+    public func `import`(_ contents: DictionaryFile.ImportContents) -> ImportResult {
+        let (candidates, generate): ([DictionaryEntry], Bool)
+        switch contents {
+        case .entries(let entries):
+            (candidates, generate) = (entries, false)
+        case .words(let words):
+            (candidates, generate) = (words.map { DictionaryEntry(written: $0, type: .noun) }, true)
+        }
+
+        var result = ImportResult(added: 0, skipped: 0)
+        var addedIDs: [UUID] = []
+        for var entry in candidates {
+            entry.written = entry.written.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !entry.written.isEmpty else { continue }
+            guard !isTaken(entry.written, by: nil) else {
+                result.skipped += 1
+                continue
+            }
+            let item = Item(id: UUID(), entry: entry, status: .ready)
+            items.append(item)
+            addedIDs.append(item.id)
+            result.added += 1
+        }
+        guard result.added > 0 else { return result }
+
+        save()
+        if generate {
+            addedIDs.forEach(startGeneration)
+        }
+        return result
+    }
+
+    /// Replaces every entry, e.g. with the contents of the dictionary file. Doesn't save:
+    /// the caller already holds these entries. Pending suggestions are dropped.
+    public func replaceAll(_ entries: [DictionaryEntry]) {
+        pendingRequests.removeAll()
+        items = entries.map { Item(id: UUID(), entry: $0, status: .ready) }
+    }
+
     // MARK: Generation
 
+    /// Queues a request for the item. Requests run one at a time, in order — the on-device
+    /// model handles one well, and an import can queue a hundred. A request whose token has
+    /// been cleared or replaced by the time its turn comes (the user edited or removed the
+    /// item, or asked again) is skipped without calling the generator.
     private func startGeneration(for id: UUID) {
         guard let generator, let index = index(of: id) else { return }
         let token = UUID()
@@ -93,10 +147,15 @@ public final class DictionaryEditor {
         pendingRequests[id] = token
         items[index].status = .generating
 
-        generationTasks[id] = Task { [weak self] in
+        let previous = lastGenerationTask
+        let task = Task { [weak self] in
+            await previous?.value
+            guard self?.pendingRequests[id] == token else { return }
             let suggestion = await generator.suggestEntry(for: written)
             self?.finishGeneration(for: id, token: token, suggestion: suggestion)
         }
+        generationTasks[id] = task
+        lastGenerationTask = task
     }
 
     private func finishGeneration(for id: UUID, token: UUID, suggestion: DictionaryEntry?) {
