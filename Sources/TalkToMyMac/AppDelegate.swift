@@ -8,12 +8,13 @@ import TalkToMyMacCore
 
 @available(macOS 26.0, *)
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate, RecordingIndicator, PermissionChecking {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, RecordingIndicator, PermissionChecking {
 
     // -- UI --
     private var statusItem: NSStatusItem!
     private var menu: NSMenu!
     private var toggleMenuItem: NSMenuItem!
+    private var copyLastMenuItem: NSMenuItem!
     /// Polls for Accessibility being granted, since that happens out-of-process in
     /// System Settings and there's no notification for it.
     private var accessibilityWatchTimer: Timer?
@@ -205,6 +206,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, RecordingIndicator, Pe
 
         menu.addItem(NSMenuItem.separator())
 
+        copyLastMenuItem = NSMenuItem(title: "Copy Last Dictation", action: #selector(copyLastDictation), keyEquivalent: "")
+        copyLastMenuItem.target = self
+        menu.addItem(copyLastMenuItem)
+
         let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
         settingsItem.target = self
         menu.addItem(settingsItem)
@@ -215,9 +220,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, RecordingIndicator, Pe
         menu.addItem(quitItem)
     }
 
+    /// Recovers a dictation that didn't land where expected (e.g. paste was skipped).
+    @objc private func copyLastDictation() {
+        guard let text = transcriptionStore.recentTranscriptions(limit: 1).first?.text else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
+
     @objc private func toggleRecording() {
         // The menu item behaves exactly like the toggle shortcut.
         handleShortcut(.togglePressed)
+    }
+
+    /// Greys out "Copy Last Dictation" until there's something to copy.
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem === copyLastMenuItem {
+            return !transcriptionStore.recentTranscriptions(limit: 1).isEmpty
+        }
+        return true
     }
 
     // MARK: Shortcuts
