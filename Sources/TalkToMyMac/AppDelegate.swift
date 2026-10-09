@@ -27,6 +27,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     private let speechService = SpeechTranscriptionService()
     private let formattingSettings = FormattingSettings()
     private var formatter: FoundationModelFormatter!
+    private var groqFormatter: GroqFormatter!
     private var pasteDelivery: PasteDelivery!
     private let shortcuts = ShortcutManager()
     private var settingsController: SettingsWindowController!
@@ -46,6 +47,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         )
 
         formatter = FoundationModelFormatter(settings: formattingSettings)
+        groqFormatter = GroqFormatter(settings: formattingSettings)
         pasteDelivery = PasteDelivery(settings: formattingSettings)
 
         // Always-on-top dot that becomes a live waveform while recording.
@@ -60,19 +62,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         settingsController = SettingsWindowController(
             speechService: speechService,
             formatter: formatter,
+            groqFormatter: groqFormatter,
             settings: formattingSettings,
             shortcuts: shortcuts,
             transcriptionStore: transcriptionStore,
             floatingIndicator: floatingIndicator
         )
 
-        // Build the RecorderController: mic → Speech (on-device) → Foundation Models → paste.
+        // Build the RecorderController: mic → Speech (on-device) → Foundation Models or Groq → paste.
         controller = RecorderController(
             recorder: audioCapture,
             permissionChecker: self,
             indicator: self,
             transcriber: speechService,
-            formatter: formatter,
+            formatter: FormattingRouter(settings: formattingSettings, onDevice: formatter, groq: groqFormatter),
             outputSink: pasteDelivery
         )
 
