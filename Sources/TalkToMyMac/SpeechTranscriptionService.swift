@@ -97,7 +97,7 @@ final class SpeechTranscriptionService: SpeechTranscribing, @unchecked Sendable 
         }
     }
 
-    func transcribe(samples: [Float], sampleRate: Double) async -> String? {
+    func transcribe(samples: [Float], sampleRate: Double) async -> TranscriptionOutcome? {
         guard isReady else {
             print("[SpeechTranscriptionService] Not ready")
             return nil
@@ -153,6 +153,6 @@ final class SpeechTranscriptionService: SpeechTranscribing, @unchecked Sendable 
         }
 
         let text = await resultsTask.value
-        return text.isEmpty ? nil : text
+        return text.isEmpty ? nil : TranscriptionOutcome(text: text, engine: .appleOnDevice)
     }
 }

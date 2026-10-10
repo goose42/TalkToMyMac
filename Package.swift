@@ -4,6 +4,10 @@ import PackageDescription
 let package = Package(
     name: "TalkToMyMac",
     platforms: [.macOS("26.0")],
+    dependencies: [
+        // Runs the Parakeet speech-to-text Core ML model on-device.
+        .package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.17.7"),
+    ],
     targets: [
         // Core library — pure logic, fully testable, no macOS UI dependencies
         .target(
@@ -16,6 +20,7 @@ let package = Package(
             name: "TalkToMyMac",
             dependencies: [
                 "TalkToMyMacCore",
+                .product(name: "FluidAudio", package: "FluidAudio"),
             ],
             path: "Sources/TalkToMyMac",
             linkerSettings: [

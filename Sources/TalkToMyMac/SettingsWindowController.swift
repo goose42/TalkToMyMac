@@ -9,6 +9,7 @@ import TalkToMyMacCore
 final class SettingsWindowController {
     private var window: NSWindow?
     private let speechService: SpeechTranscriptionService
+    private let parakeetService: ParakeetTranscriptionService
     private let formatter: FoundationModelFormatter
     private let groqFormatter: GroqFormatter
     private let settings: FormattingSettings
@@ -17,10 +18,12 @@ final class SettingsWindowController {
     private let floatingIndicator: FloatingIndicatorController
     private let dictionaryEditor: DictionaryEditor
 
-    init(speechService: SpeechTranscriptionService, formatter: FoundationModelFormatter,
+    init(speechService: SpeechTranscriptionService, parakeetService: ParakeetTranscriptionService,
+         formatter: FoundationModelFormatter,
          groqFormatter: GroqFormatter, settings: FormattingSettings, shortcuts: ShortcutManager, transcriptionStore: TranscriptionStore,
          floatingIndicator: FloatingIndicatorController) {
         self.speechService = speechService
+        self.parakeetService = parakeetService
         self.formatter = formatter
         self.groqFormatter = groqFormatter
         self.settings = settings
@@ -67,7 +70,7 @@ final class SettingsWindowController {
         tabs.addTabViewItem(Self.tab(
             "Models",
             symbol: "cpu",
-            ModelsView(groqFormatter: groqFormatter, settings: settings)
+            ModelsView(groqFormatter: groqFormatter, parakeetService: parakeetService, settings: settings)
         ))
         tabs.addTabViewItem(Self.tab(
             "Transcriptions",
@@ -186,6 +189,17 @@ private struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section {
+                Toggle("Mute system audio while recording", isOn: $settings.muteSystemAudioWhileRecording)
+            } header: {
+                Text("Recording")
+            } footer: {
+                Text("Silences everything your Mac is playing while you dictate, and restores it "
+                     + "when the recording ends. If your Mac was already muted, it stays muted.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Permissions") {
                 microphoneStatusView
                 accessibilityStatusView
@@ -194,10 +208,11 @@ private struct SettingsView: View {
             Section {
                 speechStatusView
             } header: {
-                Text("Speech Model")
+                Text("Apple Speech Model")
             } footer: {
-                Text("Transcription uses Apple's on-device speech model for your Mac's language. "
-                     + "macOS downloads it once, the first time the app runs; after that it works offline.")
+                Text("Apple's on-device speech model for your Mac's language transcribes dictations "
+                     + "unless another model is selected and loaded on the Models tab. macOS downloads it "
+                     + "once, the first time the app runs; after that it works offline.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

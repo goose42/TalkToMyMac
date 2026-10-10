@@ -64,20 +64,22 @@ final class MockIndicator: RecordingIndicator {
 final class MockTranscriber: SpeechTranscribing {
     var isReady: Bool
     var transcribeResult: String?
+    var engine: TranscriptionEngine
     var transcribeCallCount = 0
     var lastSamples: [Float]?
     var lastSampleRate: Double?
 
-    init(isReady: Bool = true, result: String? = "hello world") {
+    init(isReady: Bool = true, result: String? = "hello world", engine: TranscriptionEngine = .appleOnDevice) {
         self.isReady = isReady
         self.transcribeResult = result
+        self.engine = engine
     }
 
-    func transcribe(samples: [Float], sampleRate: Double) async -> String? {
+    func transcribe(samples: [Float], sampleRate: Double) async -> TranscriptionOutcome? {
         transcribeCallCount += 1
         lastSamples = samples
         lastSampleRate = sampleRate
-        return transcribeResult
+        return transcribeResult.map { TranscriptionOutcome(text: $0, engine: engine) }
     }
 }
 
@@ -136,6 +138,14 @@ final class MockDenoiser: AudioDenoising {
     }
 }
 
+final class MockSystemAudio: SystemAudioMuting {
+    var muteCallCount = 0
+    var restoreCallCount = 0
+
+    func muteForRecording() { muteCallCount += 1 }
+    func restoreAfterRecording() { restoreCallCount += 1 }
+}
+
 // MARK: - Helpers
 
 private func makeController(
@@ -145,7 +155,8 @@ private func makeController(
     transcriber: MockTranscriber? = nil,
     formatter: MockFormatter? = nil,
     outputSink: MockOutputSink? = nil,
-    denoiser: MockDenoiser? = nil
+    denoiser: MockDenoiser? = nil,
+    systemAudio: MockSystemAudio? = nil
 ) -> (RecorderController, MockRecorder, MockPermissionChecker, MockIndicator) {
     let rec = recorder ?? MockRecorder()
     let perm = MockPermissionChecker(permission: permission)
@@ -157,7 +168,8 @@ private func makeController(
         transcriber: transcriber,
         formatter: formatter,
         outputSink: outputSink,
-        denoiser: denoiser
+        denoiser: denoiser,
+        systemAudio: systemAudio
     )
     return (ctrl, rec, perm, ind)
 }
@@ -203,6 +215,60 @@ final class RecorderControllerTests: XCTestCase {
         // Can start again
         _ = ctrl.toggle()
         XCTAssertEqual(ctrl.state, .recording)
+    }
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // MARK: System audio muting
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    func testSystemAudioMutedWhenRecordingStarts() {
+        let audio = MockSystemAudio()
+        let (ctrl, _, _, _) = makeController(systemAudio: audio)
+        _ = ctrl.toggle()
+        XCTAssertEqual(audio.muteCallCount, 1)
+        XCTAssertEqual(audio.restoreCallCount, 0)
+    }
+
+    func testSystemAudioRestoredWhenRecordingStops() {
+        let audio = MockSystemAudio()
+        let (ctrl, _, _, _) = makeController(systemAudio: audio)
+        _ = ctrl.toggle() // start
+        _ = ctrl.toggle() // stop
+        XCTAssertEqual(audio.restoreCallCount, 1)
+    }
+
+    func testSystemAudioRestoredWhenRecordingDiscarded() {
+        let audio = MockSystemAudio()
+        let (ctrl, _, _, _) = makeController(systemAudio: audio)
+        _ = ctrl.handle(.holdPressed)
+        _ = ctrl.handle(.cancel)
+        XCTAssertEqual(audio.restoreCallCount, 1)
+    }
+
+    func testSystemAudioNotMutedWhenPermissionDenied() {
+        let audio = MockSystemAudio()
+        let (ctrl, _, _, _) = makeController(permission: .denied, systemAudio: audio)
+        _ = ctrl.toggle()
+        XCTAssertEqual(audio.muteCallCount, 0)
+    }
+
+    func testSystemAudioNotMutedWhenRecorderFailsToStart() {
+        let rec = MockRecorder()
+        rec.shouldFailStart = true
+        let audio = MockSystemAudio()
+        let (ctrl, _, _, _) = makeController(recorder: rec, systemAudio: audio)
+        _ = ctrl.toggle()
+        XCTAssertEqual(audio.muteCallCount, 0)
+    }
+
+    func testLatchingDoesNotMuteAgain() {
+        let audio = MockSystemAudio()
+        let (ctrl, _, _, _) = makeController(systemAudio: audio)
+        _ = ctrl.handle(.holdPressed)
+        _ = ctrl.handle(.togglePressed) // latch
+        _ = ctrl.handle(.holdReleased)  // ignored while latched
+        XCTAssertEqual(audio.muteCallCount, 1)
+        XCTAssertEqual(audio.restoreCallCount, 0)
     }
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -358,6 +424,13 @@ final class RecorderControllerTests: XCTestCase {
         let (ctrl, _, _, _) = makeController(transcriber: transcriber)
         let result = await ctrl.processRecording(samples: [1.0, 2.0], sampleRate: 16000)
         XCTAssertEqual(result?.finalText, "hello world")
+    }
+
+    func testProcessRecordingRecordsWhichEngineTranscribed() async {
+        let transcriber = MockTranscriber(result: "hello world", engine: .parakeetTDTv3)
+        let (ctrl, _, _, _) = makeController(transcriber: transcriber)
+        let result = await ctrl.processRecording(samples: [1.0, 2.0], sampleRate: 16000)
+        XCTAssertEqual(result?.transcriptionEngine, .parakeetTDTv3)
     }
 
     func testProcessRecordingWithoutTranscriberReturnsNil() async {

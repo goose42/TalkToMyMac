@@ -25,6 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     private var controller: RecorderController!
     private let audioCapture = AudioCapture()
     private let speechService = SpeechTranscriptionService()
+    private let parakeetService = ParakeetTranscriptionService()
     private let formattingSettings = FormattingSettings()
     private var formatter: FoundationModelFormatter!
     private var groqFormatter: GroqFormatter!
@@ -33,6 +34,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     private var settingsController: SettingsWindowController!
     private let transcriptionStore = TranscriptionStore()
     private var floatingIndicator: FloatingIndicatorController!
+    private var systemAudioMuter: SystemAudioMuter!
 
     // MARK: NSApplicationDelegate
 
@@ -61,6 +63,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
         settingsController = SettingsWindowController(
             speechService: speechService,
+            parakeetService: parakeetService,
             formatter: formatter,
             groqFormatter: groqFormatter,
             settings: formattingSettings,
@@ -69,14 +72,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             floatingIndicator: floatingIndicator
         )
 
-        // Build the RecorderController: mic → Speech (on-device) → Foundation Models or Groq → paste.
+        systemAudioMuter = SystemAudioMuter(settings: formattingSettings)
+
+        // Build the RecorderController: mic → Apple Speech or Parakeet (both on-device) →
+        // Foundation Models or Groq → paste.
         controller = RecorderController(
             recorder: audioCapture,
             permissionChecker: self,
             indicator: self,
-            transcriber: speechService,
+            transcriber: TranscriptionRouter(settings: formattingSettings, apple: speechService, parakeet: parakeetService),
             formatter: FormattingRouter(settings: formattingSettings, onDevice: formatter, groq: groqFormatter),
-            outputSink: pasteDelivery
+            outputSink: pasteDelivery,
+            systemAudio: systemAudioMuter
         )
 
         // Status bar item
@@ -112,11 +119,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             await self?.speechService.prepare()
         }
 
+        // Reload the external speech model if it was in use when the app last quit. Until it
+        // finishes loading, dictations go to Apple's model.
+        if formattingSettings.transcriptionEngine == .parakeetTDTv3 {
+            Task { [weak self] in
+                await self?.parakeetService.load()
+            }
+        }
+
         requestPermissionsAtLaunch()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         accessibilityWatchTimer?.invalidate()
+        // Quitting mid-recording mustn't leave the Mac silent.
+        systemAudioMuter?.restoreAfterRecording()
     }
 
     // MARK: Permissions (requested up front, not on first use)

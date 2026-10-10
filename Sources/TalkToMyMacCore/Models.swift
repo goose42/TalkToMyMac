@@ -71,6 +71,8 @@ public struct PipelineResult: Equatable, Sendable {
     /// Whether `finalText` actually came from the LLM.
     public let llmApplied: Bool
     public let transcriptionDuration: Duration
+    /// The speech-to-text engine that produced `rawText`.
+    public let transcriptionEngine: TranscriptionEngine
     /// Time spent in the formatter, including a failed or timed-out attempt. `nil` when no
     /// formatter is configured at all.
     public let formattingDuration: Duration?
@@ -84,6 +86,7 @@ public struct PipelineResult: Equatable, Sendable {
         finalText: String,
         llmApplied: Bool,
         transcriptionDuration: Duration,
+        transcriptionEngine: TranscriptionEngine = .appleOnDevice,
         formattingDuration: Duration?,
         formattingModel: FormattingModel? = nil,
         tokenUsage: TokenUsage? = nil
@@ -92,6 +95,7 @@ public struct PipelineResult: Equatable, Sendable {
         self.finalText = finalText
         self.llmApplied = llmApplied
         self.transcriptionDuration = transcriptionDuration
+        self.transcriptionEngine = transcriptionEngine
         self.formattingDuration = formattingDuration
         self.formattingModel = formattingModel
         self.tokenUsage = tokenUsage

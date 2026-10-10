@@ -8,7 +8,7 @@ import TalkToMyMacCore
 /// processes the whole recording, pauses included) and formatting per word sent to the LLM.
 /// Plain per-dictation figures are shown alongside for context.
 ///
-/// Formatting gets one section per model, since on-device and remote models differ widely
+/// Transcription and formatting each get one section per model, since models differ widely
 /// in speed. Remote models also show the tokens they were billed for, to track cost.
 @available(macOS 26.0, *)
 struct InstrumentationView: View {
@@ -55,7 +55,9 @@ struct InstrumentationView: View {
                     )
                 }
             } else {
-                transcriptionSection
+                ForEach(transcriptionEngines, id: \.self) { engine in
+                    transcriptionSection(for: engine)
+                }
                 ForEach(formattingModels, id: \.self) { model in
                     formattingSection(for: model)
                     if model.isRemote {
@@ -81,8 +83,15 @@ struct InstrumentationView: View {
 
     // MARK: Sections
 
-    private var transcriptionSection: some View {
-        Section {
+    /// Speech-to-text engines used in this period, in the order they're declared.
+    private var transcriptionEngines: [TranscriptionEngine] {
+        let used = Set(rows.compactMap(\.transcriptionEngine))
+        return TranscriptionEngine.allCases.filter(used.contains)
+    }
+
+    private func transcriptionSection(for engine: TranscriptionEngine) -> some View {
+        let rows = rows.filter { $0.transcriptionEngine == engine }
+        return Section {
             StatsTable(rows: [
                 StatsRow(
                     label: "Per second of audio",
@@ -94,7 +103,7 @@ struct InstrumentationView: View {
                 ),
             ])
         } header: {
-            Text("Transcription")
+            Text("Transcription · \(engine.displayName)")
         } footer: {
             SectionNote("Speech-to-text time, weighted by recording length. "
                         + "Based on \(Self.dictations(rows.count)).")

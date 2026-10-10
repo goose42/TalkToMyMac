@@ -26,8 +26,9 @@ public extension RecordingIndicator {
 /// Speech-to-text engine.
 public protocol SpeechTranscribing: AnyObject {
     var isReady: Bool { get }
-    /// Transcribes raw mono float samples captured at `sampleRate`.
-    func transcribe(samples: [Float], sampleRate: Double) async -> String?
+    /// Transcribes raw mono float samples captured at `sampleRate`, reporting which engine
+    /// ran. Nil if transcription failed or heard nothing.
+    func transcribe(samples: [Float], sampleRate: Double) async -> TranscriptionOutcome?
 }
 
 /// Text post-processor / formatter (e.g., LLM cleanup).
@@ -59,4 +60,13 @@ public protocol AudioDenoising: AnyObject {
 /// form, e.g. with an on-device LLM. Returns nil if no suggestion could be produced.
 public protocol DictionaryEntryGenerating: Sendable {
     func suggestEntry(for written: String) async -> DictionaryEntry?
+}
+
+/// Silences the Mac's own sound output for the length of a recording, so music or video
+/// isn't playing over the dictation. Implementations decide whether muting is enabled and
+/// must leave output exactly as they found it on restore (e.g. stay muted if the user had
+/// already muted).
+public protocol SystemAudioMuting: AnyObject {
+    func muteForRecording()
+    func restoreAfterRecording()
 }

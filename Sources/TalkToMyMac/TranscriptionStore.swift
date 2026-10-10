@@ -14,6 +14,8 @@ struct DictationMetrics {
     let timestamp: Date
     let audioSeconds: Double
     let transcriptionMs: Double
+    /// The speech-to-text engine; nil if the row names one this version doesn't know.
+    let transcriptionEngine: TranscriptionEngine?
     let formattingMs: Double?
     let llmApplied: Bool
     let rawWordCount: Int
@@ -32,8 +34,8 @@ struct DictationMetrics {
 /// - `raw_transcriptions` — exactly what the speech-to-text model produced.
 /// - `formatted_transcriptions` — what was delivered after the LLM step (the raw text
 ///   unchanged if the LLM was off or failed).
-/// - `transcription_metrics` — timings, word counts, the formatting model, and (for remote
-///   models) token usage for the run.
+/// - `transcription_metrics` — timings, word counts, the speech and formatting models, and
+///   (for remote models) token usage for the run.
 final class TranscriptionStore {
     /// Posted on the main queue after a dictation is recorded.
     static let didChangeNotification = Notification.Name("TranscriptionStoreDidChange")
@@ -97,7 +99,8 @@ final class TranscriptionStore {
                 input_tokens INTEGER,             -- NULL unless a remote model reported usage
                 output_tokens INTEGER,            -- includes reasoning_tokens
                 reasoning_tokens INTEGER,
-                cached_tokens INTEGER             -- part of input_tokens
+                cached_tokens INTEGER,            -- part of input_tokens
+                transcription_model TEXT          -- the speech-to-text engine's model ID
             );
             """
         if sqlite3_exec(db, createSQL, nil, nil, nil) != SQLITE_OK {
@@ -106,6 +109,7 @@ final class TranscriptionStore {
 
         migrateLegacyTable()
         addFormattingModelColumns()
+        addTranscriptionModelColumn()
     }
 
     deinit {
@@ -159,6 +163,26 @@ final class TranscriptionStore {
         }
     }
 
+    /// Metrics tables created before speech could be transcribed by more than one engine lack
+    /// the transcription model column. Add it, and attribute earlier dictations to Apple's
+    /// on-device model — the only one there was. Runs once; a no-op afterwards.
+    private func addTranscriptionModelColumn() {
+        guard !columnExists("transcription_model", in: Table.metrics.rawValue) else { return }
+        let sql = """
+            BEGIN;
+            ALTER TABLE transcription_metrics ADD COLUMN transcription_model TEXT;
+            UPDATE transcription_metrics
+                SET transcription_model = '\(TranscriptionEngine.appleOnDevice.modelID)';
+            COMMIT;
+            """
+        if sqlite3_exec(db, sql, nil, nil, nil) != SQLITE_OK {
+            print("[TranscriptionStore] Adding transcription model column failed: \(errorMessage)")
+            sqlite3_exec(db, "ROLLBACK;", nil, nil, nil)
+        } else {
+            print("[TranscriptionStore] Added transcription model column")
+        }
+    }
+
     // MARK: - Write
 
     /// Records one dictation across all three tables, atomically. Returns the formatted
@@ -190,8 +214,9 @@ final class TranscriptionStore {
                     id, timestamp, audio_seconds, transcription_ms, formatting_ms, llm_applied,
                     raw_word_count, formatted_word_count, words_changed,
                     formatting_provider, formatting_model,
-                    input_tokens, output_tokens, reasoning_tokens, cached_tokens
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                    input_tokens, output_tokens, reasoning_tokens, cached_tokens,
+                    transcription_model
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
                 """,
                 [
                     .text(id),
@@ -209,6 +234,7 @@ final class TranscriptionStore {
                     result.tokenUsage.map { .int($0.output) } ?? .null,
                     result.tokenUsage.map { .int($0.reasoning) } ?? .null,
                     result.tokenUsage.map { .int($0.cached) } ?? .null,
+                    .text(result.transcriptionEngine.modelID),
                 ]
             )
 
@@ -263,7 +289,8 @@ final class TranscriptionStore {
             SELECT timestamp, audio_seconds, transcription_ms, formatting_ms, llm_applied,
                    raw_word_count, formatted_word_count, words_changed,
                    formatting_provider, formatting_model,
-                   input_tokens, output_tokens, reasoning_tokens, cached_tokens
+                   input_tokens, output_tokens, reasoning_tokens, cached_tokens,
+                   transcription_model
             FROM transcription_metrics WHERE timestamp >= ? ORDER BY timestamp;
             """
         var stmt: OpaquePointer?
@@ -281,6 +308,7 @@ final class TranscriptionStore {
                 timestamp: Date(timeIntervalSince1970: sqlite3_column_double(stmt, 0)),
                 audioSeconds: sqlite3_column_double(stmt, 1),
                 transcriptionMs: sqlite3_column_double(stmt, 2),
+                transcriptionEngine: Self.text(stmt, 14).flatMap(TranscriptionEngine.init(modelID:)),
                 formattingMs: sqlite3_column_type(stmt, 3) == SQLITE_NULL ? nil : sqlite3_column_double(stmt, 3),
                 llmApplied: sqlite3_column_int(stmt, 4) != 0,
                 rawWordCount: Int(sqlite3_column_int64(stmt, 5)),
