@@ -18,6 +18,7 @@ public class RecorderController: @unchecked Sendable {
     private let formatter: TextFormatting?
     private let outputSink: OutputDelivering?
     private let denoiser: AudioDenoising?
+    private let systemAudio: SystemAudioMuting?
 
     public init(
         recorder: AudioRecording,
@@ -26,7 +27,8 @@ public class RecorderController: @unchecked Sendable {
         transcriber: SpeechTranscribing? = nil,
         formatter: TextFormatting? = nil,
         outputSink: OutputDelivering? = nil,
-        denoiser: AudioDenoising? = nil
+        denoiser: AudioDenoising? = nil,
+        systemAudio: SystemAudioMuting? = nil
     ) {
         self.recorder = recorder
         self.permissionChecker = permissionChecker
@@ -35,6 +37,7 @@ public class RecorderController: @unchecked Sendable {
         self.formatter = formatter
         self.outputSink = outputSink
         self.denoiser = denoiser
+        self.systemAudio = systemAudio
     }
 
     /// Toggle recording state. Returns success/failure.
@@ -102,6 +105,7 @@ public class RecorderController: @unchecked Sendable {
             return .failure(.recordingFailed("\(error)"))
         }
 
+        systemAudio?.muteForRecording()
         indicator.setRecording(true)
         state = .recording
         activeMode = mode
@@ -115,6 +119,7 @@ public class RecorderController: @unchecked Sendable {
             return .failure(.recordingFailed("\(error)"))
         }
 
+        systemAudio?.restoreAfterRecording()
         indicator.setRecording(false)
         state = .idle
         activeMode = nil
@@ -136,7 +141,8 @@ public class RecorderController: @unchecked Sendable {
         defer { indicator.setProcessing(false) }
 
         let transcribeStart = clock.now
-        guard let rawText = await transcriber.transcribe(samples: processedSamples, sampleRate: sampleRate) else { return nil }
+        guard let transcription = await transcriber.transcribe(samples: processedSamples, sampleRate: sampleRate) else { return nil }
+        let rawText = transcription.text
         let transcriptionDuration = clock.now - transcribeStart
 
         // 3. Format (optional — falls back to raw text on any failure, and skipped entirely
@@ -161,6 +167,7 @@ public class RecorderController: @unchecked Sendable {
             finalText: finalText,
             llmApplied: formattedText != nil,
             transcriptionDuration: transcriptionDuration,
+            transcriptionEngine: transcription.engine,
             formattingDuration: formattingDuration,
             formattingModel: outcome?.model,
             tokenUsage: outcome?.usage

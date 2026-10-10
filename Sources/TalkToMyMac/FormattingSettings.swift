@@ -16,6 +16,7 @@ final class FormattingSettings: @unchecked Sendable {
         static let promptPreset = "promptPreset"
         static let customInstructions = "customInstructions"
         static let autoPasteEnabled = "autoPasteEnabled"
+        static let muteSystemAudioWhileRecording = "muteSystemAudioWhileRecording"
         static let skipShortDictations = "skipShortDictations"
         static let formattingWordThreshold = "formattingWordThreshold"
         static let dictionaryJSON = "dictionaryJSON"
@@ -23,6 +24,7 @@ final class FormattingSettings: @unchecked Sendable {
         static let formattingProvider = "formattingProvider"
         static let groqModel = "groqModel"
         static let tokenPrices = "tokenPrices"
+        static let transcriptionEngine = "transcriptionEngine"
         /// Plain word list from the first, unreleased version of the dictionary; migrated
         /// into `dictionaryJSON` on launch.
         static let legacyDictionaryWords = "dictionaryWords"
@@ -82,6 +84,12 @@ final class FormattingSettings: @unchecked Sendable {
         didSet { UserDefaults.standard.set(provider.rawValue, forKey: Keys.formattingProvider) }
     }
 
+    /// Which speech-to-text model transcribes dictations. An external model is only used once
+    /// it's loaded; until then — and after it's unloaded — Apple's on-device model is.
+    var transcriptionEngine: TranscriptionEngine {
+        didSet { UserDefaults.standard.set(transcriptionEngine.rawValue, forKey: Keys.transcriptionEngine) }
+    }
+
     /// The model used when `provider` is `.groq`.
     var groqModel: GroqModel {
         didSet { UserDefaults.standard.set(groqModel.rawValue, forKey: Keys.groqModel) }
@@ -98,6 +106,11 @@ final class FormattingSettings: @unchecked Sendable {
     /// Whether a successful transcript should be pasted at the cursor automatically.
     var autoPasteEnabled: Bool {
         didSet { UserDefaults.standard.set(autoPasteEnabled, forKey: Keys.autoPasteEnabled) }
+    }
+
+    /// Whether the Mac's sound output is muted for the length of each recording.
+    var muteSystemAudioWhileRecording: Bool {
+        didSet { UserDefaults.standard.set(muteSystemAudioWhileRecording, forKey: Keys.muteSystemAudioWhileRecording) }
     }
 
     init() {
@@ -123,10 +136,13 @@ final class FormattingSettings: @unchecked Sendable {
 
         isEnabled = defaults.object(forKey: Keys.llmFormattingEnabled) as? Bool ?? true
         autoPasteEnabled = defaults.object(forKey: Keys.autoPasteEnabled) as? Bool ?? true
+        muteSystemAudioWhileRecording = defaults.object(forKey: Keys.muteSystemAudioWhileRecording) as? Bool ?? false
         skipShortDictations = defaults.object(forKey: Keys.skipShortDictations) as? Bool ?? false
         formattingWordThreshold = defaults.object(forKey: Keys.formattingWordThreshold) as? Int ?? 3
         provider = defaults.string(forKey: Keys.formattingProvider).flatMap(FormattingProvider.init) ?? .default
         groqModel = defaults.string(forKey: Keys.groqModel).flatMap(GroqModel.init) ?? .default
+        transcriptionEngine = defaults.string(forKey: Keys.transcriptionEngine)
+            .flatMap(TranscriptionEngine.init(rawValue:)) ?? .default
         tokenPrices = defaults.data(forKey: Keys.tokenPrices)
             .flatMap { try? JSONDecoder().decode([String: TokenPrice].self, from: $0) } ?? [:]
         if let saved = defaults.string(forKey: Keys.dictionaryJSON) {
