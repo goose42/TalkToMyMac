@@ -75,6 +75,24 @@ public final class DictionaryEditor {
         return true
     }
 
+    /// Appends heard-as forms the entry doesn't have yet (ignoring case, and skipping the
+    /// written form), e.g. ones learned from a recording. Counts as an edit, so it wins over
+    /// a pending suggestion. Returns the forms actually added; saves only if there were any.
+    @discardableResult
+    public func addSoundsLike(_ forms: [String], to id: UUID) -> [String] {
+        guard let index = index(of: id) else { return [] }
+        var entry = items[index].entry
+        var seen = Set(([entry.written] + entry.soundsLike).map { $0.lowercased() })
+        let added = forms
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty && seen.insert($0.lowercased()).inserted }
+        guard !added.isEmpty else { return [] }
+
+        entry.soundsLike += added
+        update(id, to: entry)
+        return added
+    }
+
     public func remove(_ id: UUID) {
         cancelGeneration(for: id)
         items.removeAll { $0.id == id }
