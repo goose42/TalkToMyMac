@@ -94,6 +94,9 @@ Open Settings from the menu bar item (⌘,) to:
   is required, except for F1–F20 and Fn on its own (push to talk only). macOS can't detect clashes with other apps' shortcuts,
   so if one doesn't respond, something else probably owns it — pick another.
 - Check on-device Speech model status and trigger a download.
+- Enable deterministic cleanup: a model-free pass that drops fillers ("um"), self-corrections
+  and stutters, turns spoken punctuation, numbers and "write an email to…" into text, and
+  applies the dictionary's sounds-like fixes. It runs before LLM formatting, or on its own.
 - Enable/disable LLM formatting and pick a preset (Clean Up, Verbatim, Email, Code Comment,
   or a fully custom system prompt).
 - Enable/disable auto-paste at the cursor.

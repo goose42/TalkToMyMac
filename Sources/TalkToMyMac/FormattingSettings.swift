@@ -13,6 +13,7 @@ import TalkToMyMacCore
 final class FormattingSettings: @unchecked Sendable {
     private enum Keys {
         static let llmFormattingEnabled = "llmFormattingEnabled"
+        static let deterministicCleanupEnabled = "deterministicCleanupEnabled"
         static let promptPreset = "promptPreset"
         static let customInstructions = "customInstructions"
         static let autoPasteEnabled = "autoPasteEnabled"
@@ -31,9 +32,16 @@ final class FormattingSettings: @unchecked Sendable {
     }
 
     /// Whether the LLM formatting step runs at all. When false, `processRecording` delivers
-    /// the raw transcript untouched.
+    /// the transcript as is (after deterministic cleanup, if that's on).
     var isEnabled: Bool {
         didSet { UserDefaults.standard.set(isEnabled, forKey: Keys.llmFormattingEnabled) }
+    }
+
+    /// Whether the model-free cleanup step (fillers, repairs, voice commands, dictionary fixes)
+    /// runs before formatting. Independent of `isEnabled`: with the LLM off, its output is
+    /// what gets delivered.
+    var deterministicCleanupEnabled: Bool {
+        didSet { UserDefaults.standard.set(deterministicCleanupEnabled, forKey: Keys.deterministicCleanupEnabled) }
     }
 
     /// Which preset is selected in Settings. Changing this repopulates `customInstructions`
@@ -135,6 +143,7 @@ final class FormattingSettings: @unchecked Sendable {
         }
 
         isEnabled = defaults.object(forKey: Keys.llmFormattingEnabled) as? Bool ?? true
+        deterministicCleanupEnabled = defaults.object(forKey: Keys.deterministicCleanupEnabled) as? Bool ?? false
         autoPasteEnabled = defaults.object(forKey: Keys.autoPasteEnabled) as? Bool ?? true
         muteSystemAudioWhileRecording = defaults.object(forKey: Keys.muteSystemAudioWhileRecording) as? Bool ?? false
         skipShortDictations = defaults.object(forKey: Keys.skipShortDictations) as? Bool ?? false

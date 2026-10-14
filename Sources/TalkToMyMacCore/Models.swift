@@ -66,7 +66,10 @@ public enum ShortcutOutcome: Equatable {
 public struct PipelineResult: Equatable, Sendable {
     /// Exactly what the speech-to-text model returned.
     public let rawText: String
-    /// What was delivered: the LLM's output, or `rawText` if formatting was off or failed.
+    /// What deterministic cleanup turned `rawText` into; nil if cleanup didn't run.
+    public let cleanedText: String?
+    /// What was delivered: the LLM's output, or the cleaned (else raw) text if formatting
+    /// was off or failed.
     public let finalText: String
     /// Whether `finalText` actually came from the LLM.
     public let llmApplied: Bool
@@ -83,6 +86,7 @@ public struct PipelineResult: Equatable, Sendable {
 
     public init(
         rawText: String,
+        cleanedText: String? = nil,
         finalText: String,
         llmApplied: Bool,
         transcriptionDuration: Duration,
@@ -92,6 +96,7 @@ public struct PipelineResult: Equatable, Sendable {
         tokenUsage: TokenUsage? = nil
     ) {
         self.rawText = rawText
+        self.cleanedText = cleanedText
         self.finalText = finalText
         self.llmApplied = llmApplied
         self.transcriptionDuration = transcriptionDuration

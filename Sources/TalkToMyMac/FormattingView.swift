@@ -2,8 +2,9 @@ import FoundationModels
 import SwiftUI
 import TalkToMyMacCore
 
-/// Settings tab for the LLM formatting step: on/off, prompt preset and instructions, and
-/// the word count a transcript must exceed to be worth formatting.
+/// Settings tab for the formatting steps: deterministic cleanup on/off, then the LLM step's
+/// on/off, prompt preset and instructions, and the word count a transcript must exceed to
+/// be worth formatting.
 @available(macOS 26.0, *)
 struct FormattingView: View {
     let formatter: FoundationModelFormatter
@@ -11,6 +12,19 @@ struct FormattingView: View {
 
     var body: some View {
         Form {
+            Section {
+                Toggle("Enable deterministic cleanup", isOn: $settings.deterministicCleanupEnabled)
+            } header: {
+                Text("Cleanup")
+            } footer: {
+                Text("Removes filler words, self-corrections and stutters, turns spoken punctuation "
+                     + "(“comma”, “new line”), numbers and dictated emails into text, "
+                     + "and applies your dictionary’s sounds-like fixes — without a model. "
+                     + "Runs before LLM formatting, and on its own when LLM formatting is off.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("LLM Formatting") {
                 Toggle("Enable LLM formatting", isOn: $settings.isEnabled)
 

@@ -46,6 +46,12 @@ public protocol PitchShifting: AnyObject {
     func shift(_ samples: [Float], sampleRate: Double, cents: Int) -> [Float]?
 }
 
+/// Deterministic, model-free cleanup run between transcription and formatting.
+public protocol TextCleaning: AnyObject {
+    /// The cleaned-up transcript, or nil when cleanup is off and `text` should pass through.
+    func clean(_ text: String) -> String?
+}
+
 /// Text post-processor / formatter (e.g., LLM cleanup).
 public protocol TextFormatting: AnyObject {
     /// Whether a transcript of this many words should be formatted at all. When false, the
