@@ -304,6 +304,39 @@ final class DictionaryEditorTests: XCTestCase {
         await editor.generationTasks[old]?.value
         XCTAssertEqual(editor.entries, [DictionaryEntry(written: "REST", type: .acronym)])
     }
+
+    // MARK: Adding heard-as forms
+
+    func testAddSoundsLikeAppendsNewFormsIgnoringCase() throws {
+        let editor = makeEditor(entries: [DictionaryEntry(written: "OTel", type: .acronym, soundsLike: ["hotel"])])
+        let id = try XCTUnwrap(editor.items.first?.id)
+
+        let added = editor.addSoundsLike(["Hotel", " oh tell ", "", "motel", "OH TELL"], to: id)
+        XCTAssertEqual(added, ["oh tell", "motel"])
+        XCTAssertEqual(editor.item(id)?.entry.soundsLike, ["hotel", "oh tell", "motel"])
+        XCTAssertEqual(saved.last?.first?.soundsLike, ["hotel", "oh tell", "motel"])
+    }
+
+    func testAddSoundsLikeSkipsTheWrittenFormAndDoesNotSaveWhenNothingIsNew() throws {
+        let editor = makeEditor(entries: [DictionaryEntry(written: "OTel", type: .acronym, soundsLike: ["hotel"])])
+        let id = try XCTUnwrap(editor.items.first?.id)
+
+        XCTAssertEqual(editor.addSoundsLike(["hotel", "otel"], to: id), [])
+        XCTAssertTrue(saved.isEmpty)
+        XCTAssertEqual(editor.addSoundsLike(["hotel"], to: UUID()), [])
+    }
+
+    func testAddSoundsLikeOverridesPendingSuggestion() async throws {
+        let generator = GatedEntryGenerator()
+        let editor = makeEditor(generator: generator)
+        let id = try XCTUnwrap(editor.add("OTel"))
+
+        editor.addSoundsLike(["motel"], to: id)
+        XCTAssertEqual(editor.item(id)?.status, .ready)
+        generator.release(otelSuggestion)
+        await editor.generationTasks[id]?.value
+        XCTAssertEqual(editor.item(id)?.entry.soundsLike, ["motel"])
+    }
 }
 
 /// Answers after a short delay, recording how many requests overlapped.

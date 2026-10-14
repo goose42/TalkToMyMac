@@ -10,6 +10,7 @@ import UniformTypeIdentifiers
 struct DictionaryView: View {
     let editor: DictionaryEditor
     @Bindable var settings: FormattingSettings
+    let transcriber: TranscriptionRouter
     @State private var newWord = ""
     @State private var selection: UUID?
     /// Outcome of the last import or export, shown under the Storage buttons.
@@ -17,7 +18,7 @@ struct DictionaryView: View {
 
     var body: some View {
         if let selection, editor.item(selection) != nil {
-            EntryDetailView(editor: editor, id: selection) { self.selection = nil }
+            EntryDetailView(editor: editor, transcriber: transcriber, id: selection) { self.selection = nil }
                 .id(selection)
         } else {
             listPage
@@ -247,6 +248,7 @@ struct DictionaryView: View {
 @available(macOS 26.0, *)
 private struct EntryDetailView: View {
     let editor: DictionaryEditor
+    let transcriber: TranscriptionRouter
     let id: UUID
     let onBack: () -> Void
 
@@ -254,6 +256,7 @@ private struct EntryDetailView: View {
     @State private var soundsLike = ""
     @State private var context = ""
     @State private var writtenIsInvalid = false
+    @State private var isRecordingPronunciation = false
 
     var body: some View {
         if let item = editor.item(id) {
@@ -276,6 +279,11 @@ private struct EntryDetailView: View {
             .frame(minWidth: 440, maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .onExitCommand(perform: onBack)
             .onAppear { loadDrafts(from: item.entry) }
+            .sheet(isPresented: $isRecordingPronunciation, onDismiss: {
+                if let entry = editor.item(id)?.entry { loadDrafts(from: entry) }
+            }) {
+                PronunciationRecorderView(editor: editor, id: id, transcriber: transcriber)
+            }
             .onChange(of: item.status) { old, new in
                 // A suggestion just landed: show it in the text fields.
                 if old == .generating, new == .ready, let entry = editor.item(id)?.entry {
@@ -310,9 +318,12 @@ private struct EntryDetailView: View {
                     .onChange(of: soundsLike) { _, value in
                         update { $0.soundsLike = DictionaryEntry.parseList(value) }
                     }
+                Button("Record Pronunciation…", systemImage: "mic") { isRecordingPronunciation = true }
+                    .disabled(!transcriber.isReady)
             } footer: {
                 Text("What transcription writes instead of this term, comma-separated. Check the "
-                     + "Transcriptions tab for what it actually produced.")
+                     + "Transcriptions tab for what it actually produced, or record yourself saying "
+                     + "the term to add what transcription hears.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

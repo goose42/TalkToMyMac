@@ -37,4 +37,15 @@ final class TranscriptionRouter: SpeechTranscribing, @unchecked Sendable {
             return await apple.transcribe(samples: samples, sampleRate: sampleRate)
         }
     }
+
+    /// The candidates of whichever engine would transcribe a dictation right now, so words
+    /// learned from a recording match what that engine actually writes.
+    func transcribeAlternatives(samples: [Float], sampleRate: Double) async -> [String] {
+        switch engine {
+        case .appleOnDevice:
+            return await apple.transcribeAlternatives(samples: samples, sampleRate: sampleRate)
+        case .parakeetTDTv3:
+            return await parakeet.transcribeAlternatives(samples: samples, sampleRate: sampleRate)
+        }
+    }
 }

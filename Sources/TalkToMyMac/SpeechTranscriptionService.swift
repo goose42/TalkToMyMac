@@ -42,8 +42,8 @@ final class SpeechTranscriptionService: SpeechTranscribing, @unchecked Sendable 
     /// A `SpeechTranscriber`'s `results` is a single-consumer `AsyncThrowingStream`: awaiting
     /// `next()` on it from two tasks traps with "attempt to await next() on more than one
     /// task". So instances are never reused across transcriptions — each call gets its own.
-    private func makeTranscriber() -> SpeechTranscriber {
-        SpeechTranscriber(locale: resolvedLocale, preset: .transcription)
+    private func makeTranscriber(preset: SpeechTranscriber.Preset = .transcription) -> SpeechTranscriber {
+        SpeechTranscriber(locale: resolvedLocale, preset: preset)
     }
 
     /// Resolves the best-supported locale, checks/downloads the on-device model asset, and
@@ -98,6 +98,36 @@ final class SpeechTranscriptionService: SpeechTranscribing, @unchecked Sendable 
     }
 
     func transcribe(samples: [Float], sampleRate: Double) async -> TranscriptionOutcome? {
+        let segments = await analyze(samples: samples, sampleRate: sampleRate, preset: .transcription)
+        let text = segments?.map { String($0.text.characters) }.joined() ?? ""
+        return text.isEmpty ? nil : TranscriptionOutcome(text: text, engine: .appleOnDevice)
+    }
+
+    /// The engine's n-best list. Short clips usually come back as a single segment; when
+    /// there are several, each segment's alternatives are combined with the other
+    /// segments' best text, so every candidate still covers the whole clip.
+    func transcribeAlternatives(samples: [Float], sampleRate: Double) async -> [String] {
+        guard let segments = await analyze(samples: samples, sampleRate: sampleRate,
+                                           preset: .transcriptionWithAlternatives) else { return [] }
+        let best = segments.map { String($0.text.characters) }
+        var candidates = [best.joined()]
+        for (index, segment) in segments.enumerated() {
+            for alternative in segment.alternatives {
+                var combined = best
+                combined[index] = String(alternative.characters)
+                candidates.append(combined.joined())
+            }
+        }
+        var seen = Set<String>()
+        return candidates.filter {
+            !$0.trimmingCharacters(in: .whitespaces).isEmpty && seen.insert($0).inserted
+        }
+    }
+
+    /// Runs the clip through a fresh transcriber and returns its final results, or nil if
+    /// the service isn't ready or analysis failed.
+    private func analyze(samples: [Float], sampleRate: Double,
+                         preset: SpeechTranscriber.Preset) async -> [SpeechTranscriber.Result]? {
         guard isReady else {
             print("[SpeechTranscriptionService] Not ready")
             return nil
@@ -105,7 +135,7 @@ final class SpeechTranscriptionService: SpeechTranscribing, @unchecked Sendable 
 
         // A fresh transcriber per call: `results` is single-consumer, so reusing one
         // instance across recordings traps once a second iteration starts.
-        let transcriber = makeTranscriber()
+        let transcriber = makeTranscriber(preset: preset)
 
         guard let targetFormat = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber]) else {
             print("[SpeechTranscriptionService] No compatible audio format for transcriber")
@@ -124,16 +154,16 @@ final class SpeechTranscriptionService: SpeechTranscribing, @unchecked Sendable 
         let (stream, continuation) = AsyncStream<AnalyzerInput>.makeStream()
 
         // Start consuming results before kicking off analysis so nothing is missed.
-        let resultsTask = Task<String, Never> {
-            var text = ""
+        let resultsTask = Task<[SpeechTranscriber.Result], Never> {
+            var segments: [SpeechTranscriber.Result] = []
             do {
                 for try await result in transcriber.results where result.isFinal {
-                    text += String(result.text.characters)
+                    segments.append(result)
                 }
             } catch {
                 print("[SpeechTranscriptionService] Results stream error: \(error)")
             }
-            return text
+            return segments
         }
 
         do {
@@ -152,7 +182,6 @@ final class SpeechTranscriptionService: SpeechTranscribing, @unchecked Sendable 
             return nil
         }
 
-        let text = await resultsTask.value
-        return text.isEmpty ? nil : TranscriptionOutcome(text: text, engine: .appleOnDevice)
+        return await resultsTask.value
     }
 }

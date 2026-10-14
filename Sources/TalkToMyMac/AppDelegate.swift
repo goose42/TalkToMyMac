@@ -61,9 +61,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             }
         }
 
+        let transcriptionRouter = TranscriptionRouter(settings: formattingSettings, apple: speechService,
+                                                      parakeet: parakeetService)
         settingsController = SettingsWindowController(
             speechService: speechService,
             parakeetService: parakeetService,
+            transcriptionRouter: transcriptionRouter,
             formatter: formatter,
             groqFormatter: groqFormatter,
             settings: formattingSettings,
@@ -80,7 +83,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             recorder: audioCapture,
             permissionChecker: self,
             indicator: self,
-            transcriber: TranscriptionRouter(settings: formattingSettings, apple: speechService, parakeet: parakeetService),
+            transcriber: transcriptionRouter,
             formatter: FormattingRouter(settings: formattingSettings, onDevice: formatter, groq: groqFormatter),
             outputSink: pasteDelivery,
             systemAudio: systemAudioMuter

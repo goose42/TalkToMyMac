@@ -29,6 +29,21 @@ public protocol SpeechTranscribing: AnyObject {
     /// Transcribes raw mono float samples captured at `sampleRate`, reporting which engine
     /// ran. Nil if transcription failed or heard nothing.
     func transcribe(samples: [Float], sampleRate: Double) async -> TranscriptionOutcome?
+    /// The engine's candidate transcriptions, best first. Empty if nothing was heard.
+    func transcribeAlternatives(samples: [Float], sampleRate: Double) async -> [String]
+}
+
+public extension SpeechTranscribing {
+    /// Engines without an n-best list offer just their single transcription.
+    func transcribeAlternatives(samples: [Float], sampleRate: Double) async -> [String] {
+        await transcribe(samples: samples, sampleRate: sampleRate).map { [$0.text] } ?? []
+    }
+}
+
+/// Shifts pitch without changing tempo, for simulating a higher or lower voice. Returns nil
+/// if the audio couldn't be rendered.
+public protocol PitchShifting: AnyObject {
+    func shift(_ samples: [Float], sampleRate: Double, cents: Int) -> [Float]?
 }
 
 /// Text post-processor / formatter (e.g., LLM cleanup).

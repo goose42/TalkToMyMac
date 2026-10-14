@@ -10,6 +10,7 @@ final class SettingsWindowController {
     private var window: NSWindow?
     private let speechService: SpeechTranscriptionService
     private let parakeetService: ParakeetTranscriptionService
+    private let transcriptionRouter: TranscriptionRouter
     private let formatter: FoundationModelFormatter
     private let groqFormatter: GroqFormatter
     private let settings: FormattingSettings
@@ -19,11 +20,13 @@ final class SettingsWindowController {
     private let dictionaryEditor: DictionaryEditor
 
     init(speechService: SpeechTranscriptionService, parakeetService: ParakeetTranscriptionService,
+         transcriptionRouter: TranscriptionRouter,
          formatter: FoundationModelFormatter,
          groqFormatter: GroqFormatter, settings: FormattingSettings, shortcuts: ShortcutManager, transcriptionStore: TranscriptionStore,
          floatingIndicator: FloatingIndicatorController) {
         self.speechService = speechService
         self.parakeetService = parakeetService
+        self.transcriptionRouter = transcriptionRouter
         self.formatter = formatter
         self.groqFormatter = groqFormatter
         self.settings = settings
@@ -60,7 +63,7 @@ final class SettingsWindowController {
         tabs.addTabViewItem(Self.tab(
             "Dictionary",
             symbol: "character.book.closed",
-            DictionaryView(editor: dictionaryEditor, settings: settings)
+            DictionaryView(editor: dictionaryEditor, settings: settings, transcriber: transcriptionRouter)
         ))
         tabs.addTabViewItem(Self.tab(
             "Formatting",
