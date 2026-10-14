@@ -108,6 +108,22 @@ final class MockFormatter: TextFormatting {
     }
 }
 
+final class MockCleaner: TextCleaning {
+    var cleanResult: String?
+    var cleanCallCount = 0
+    var lastInput: String?
+
+    init(result: String?) {
+        self.cleanResult = result
+    }
+
+    func clean(_ text: String) -> String? {
+        cleanCallCount += 1
+        lastInput = text
+        return cleanResult
+    }
+}
+
 final class MockOutputSink: OutputDelivering {
     var deliverCallCount = 0
     var lastText: String?
@@ -153,6 +169,7 @@ private func makeController(
     recorder: MockRecorder? = nil,
     indicator: MockIndicator? = nil,
     transcriber: MockTranscriber? = nil,
+    cleaner: MockCleaner? = nil,
     formatter: MockFormatter? = nil,
     outputSink: MockOutputSink? = nil,
     denoiser: MockDenoiser? = nil,
@@ -166,6 +183,7 @@ private func makeController(
         permissionChecker: perm,
         indicator: ind,
         transcriber: transcriber,
+        cleaner: cleaner,
         formatter: formatter,
         outputSink: outputSink,
         denoiser: denoiser,
@@ -480,6 +498,90 @@ final class RecorderControllerTests: XCTestCase {
         let samples: [Float] = [1.0, 2.0, 3.0]
         _ = await ctrl.processRecording(samples: samples, sampleRate: 16000)
         XCTAssertEqual(transcriber.lastSamples, samples)
+    }
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // MARK: Pipeline — Cleaner
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    func testProcessRecordingCleanerReceivesRawTranscript() async {
+        let transcriber = MockTranscriber(result: "um hello world")
+        let cleaner = MockCleaner(result: "Hello world")
+        let (ctrl, _, _, _) = makeController(transcriber: transcriber, cleaner: cleaner)
+        let result = await ctrl.processRecording(samples: [1.0], sampleRate: 16000)
+        XCTAssertEqual(cleaner.lastInput, "um hello world")
+        XCTAssertEqual(result?.rawText, "um hello world")
+        XCTAssertEqual(result?.cleanedText, "Hello world")
+    }
+
+    func testProcessRecordingFormatsCleanedText() async {
+        let transcriber = MockTranscriber(result: "um hello world")
+        let cleaner = MockCleaner(result: "Hello world")
+        let formatter = MockFormatter(result: "Hello, world.")
+        let (ctrl, _, _, _) = makeController(transcriber: transcriber, cleaner: cleaner, formatter: formatter)
+        let result = await ctrl.processRecording(samples: [1.0], sampleRate: 16000)
+        XCTAssertEqual(formatter.lastInput, "Hello world")
+        XCTAssertEqual(result?.finalText, "Hello, world.")
+    }
+
+    func testProcessRecordingCountsCleanedWordsForShouldFormat() async {
+        let transcriber = MockTranscriber(result: "um uh hello there world")
+        let cleaner = MockCleaner(result: "hello there world")
+        let formatter = MockFormatter(result: "Hello there, world.")
+        let (ctrl, _, _, _) = makeController(transcriber: transcriber, cleaner: cleaner, formatter: formatter)
+        _ = await ctrl.processRecording(samples: [1.0], sampleRate: 16000)
+        XCTAssertEqual(formatter.lastWordCount, 3)
+    }
+
+    func testProcessRecordingDeliversCleanedTextWithoutFormatter() async {
+        let transcriber = MockTranscriber(result: "um hello world")
+        let cleaner = MockCleaner(result: "Hello world")
+        let sink = MockOutputSink()
+        let (ctrl, _, _, _) = makeController(transcriber: transcriber, cleaner: cleaner, outputSink: sink)
+        let result = await ctrl.processRecording(samples: [1.0], sampleRate: 16000)
+        XCTAssertEqual(result?.finalText, "Hello world")
+        XCTAssertEqual(result?.llmApplied, false)
+        XCTAssertEqual(sink.lastText, "Hello world")
+    }
+
+    func testProcessRecordingFormatterFailureFallsBackToCleanedText() async {
+        let transcriber = MockTranscriber(result: "um hello world")
+        let cleaner = MockCleaner(result: "Hello world")
+        let formatter = MockFormatter(result: nil)
+        let (ctrl, _, _, _) = makeController(transcriber: transcriber, cleaner: cleaner, formatter: formatter)
+        let result = await ctrl.processRecording(samples: [1.0], sampleRate: 16000)
+        XCTAssertEqual(result?.finalText, "Hello world")
+    }
+
+    func testProcessRecordingCleanerOffLeavesCleanedTextNil() async {
+        let transcriber = MockTranscriber(result: "um hello world")
+        let cleaner = MockCleaner(result: nil)
+        let formatter = MockFormatter(result: nil)
+        let (ctrl, _, _, _) = makeController(transcriber: transcriber, cleaner: cleaner, formatter: formatter)
+        let result = await ctrl.processRecording(samples: [1.0], sampleRate: 16000)
+        XCTAssertNil(result?.cleanedText)
+        XCTAssertEqual(formatter.lastInput, "um hello world")
+        XCTAssertEqual(result?.finalText, "um hello world")
+    }
+
+    func testProcessRecordingWithoutCleanerLeavesCleanedTextNil() async {
+        let transcriber = MockTranscriber(result: "hello world")
+        let (ctrl, _, _, _) = makeController(transcriber: transcriber)
+        let result = await ctrl.processRecording(samples: [1.0], sampleRate: 16000)
+        XCTAssertNil(result?.cleanedText)
+    }
+
+    /// "um" on its own cleans to nothing — treat it like the transcriber hearing nothing.
+    func testProcessRecordingEmptyCleanedTextDeliversNothing() async {
+        let transcriber = MockTranscriber(result: "um")
+        let cleaner = MockCleaner(result: "")
+        let formatter = MockFormatter(result: "Um.")
+        let sink = MockOutputSink()
+        let (ctrl, _, _, _) = makeController(transcriber: transcriber, cleaner: cleaner, formatter: formatter, outputSink: sink)
+        let result = await ctrl.processRecording(samples: [1.0], sampleRate: 16000)
+        XCTAssertNil(result)
+        XCTAssertEqual(formatter.formatCallCount, 0)
+        XCTAssertEqual(sink.deliverCallCount, 0)
     }
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

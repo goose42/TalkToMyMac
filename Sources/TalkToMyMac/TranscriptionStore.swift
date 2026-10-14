@@ -32,8 +32,8 @@ struct DictationMetrics {
 /// Each dictation writes one row to each of three independent tables, all sharing the same
 /// `id` and `timestamp`:
 /// - `raw_transcriptions` — exactly what the speech-to-text model produced.
-/// - `formatted_transcriptions` — what was delivered after the LLM step (the raw text
-///   unchanged if the LLM was off or failed).
+/// - `formatted_transcriptions` — what was delivered after cleanup and the LLM step (the
+///   cleaned, else raw, text if the LLM was off or failed).
 /// - `transcription_metrics` — timings, word counts, the speech and formatting models, and
 ///   (for remote models) token usage for the run.
 final class TranscriptionStore {
@@ -227,7 +227,8 @@ final class TranscriptionStore {
                     .int(result.llmApplied ? 1 : 0),
                     .int(WordDiff.wordCount(result.rawText)),
                     .int(WordDiff.wordCount(result.finalText)),
-                    .int(WordDiff.changedWords(from: result.rawText, to: result.finalText)),
+                    // Measured from the formatter's input, so it counts only the LLM's edits.
+                    .int(WordDiff.changedWords(from: result.cleanedText ?? result.rawText, to: result.finalText)),
                     result.formattingModel.map { .text($0.provider.rawValue) } ?? .null,
                     result.formattingModel.map { .text($0.modelID) } ?? .null,
                     result.tokenUsage.map { .int($0.input) } ?? .null,

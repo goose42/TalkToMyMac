@@ -78,12 +78,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         systemAudioMuter = SystemAudioMuter(settings: formattingSettings)
 
         // Build the RecorderController: mic → Apple Speech or Parakeet (both on-device) →
-        // Foundation Models or Groq → paste.
+        // optional deterministic cleanup → Foundation Models or Groq → paste.
         controller = RecorderController(
             recorder: audioCapture,
             permissionChecker: self,
             indicator: self,
             transcriber: transcriptionRouter,
+            cleaner: CleanupRouter(settings: formattingSettings),
             formatter: FormattingRouter(settings: formattingSettings, onDevice: formatter, groq: groqFormatter),
             outputSink: pasteDelivery,
             systemAudio: systemAudioMuter
