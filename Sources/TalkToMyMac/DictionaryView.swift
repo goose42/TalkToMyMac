@@ -13,6 +13,8 @@ struct DictionaryView: View {
     let transcriber: TranscriptionRouter
     @State private var newWord = ""
     @State private var selection: UUID?
+    /// Fuzzy filter over the word list; kept while a word's details are open.
+    @State private var filter = ""
     /// Outcome of the last import or export, shown under the Storage buttons.
     @State private var transferMessage: String?
 
@@ -62,16 +64,7 @@ struct DictionaryView: View {
 
             storageSection
 
-            Section("Words") {
-                if editor.items.isEmpty {
-                    Text("No words yet.")
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(editor.items) { item in
-                        row(item)
-                    }
-                }
-            }
+            wordsSection
         }
         // Grouped, like the other tabs: it scrolls, which a long word list needs (the default
         // columns style doesn't, and clips everything past the window's fixed height).
@@ -82,6 +75,46 @@ struct DictionaryView: View {
             if let entries = settings.reloadDictionaryFile() {
                 editor.replaceAll(entries)
             }
+        }
+    }
+
+    // MARK: Words
+
+    private var wordsSection: some View {
+        let matches = DictionaryFilter.filter(editor.items, query: filter)
+        let isFiltering = !filter.allSatisfy(\.isWhitespace)
+        return Section {
+            if editor.items.isEmpty {
+                Text("No words yet.")
+                    .foregroundStyle(.secondary)
+            } else {
+                HStack {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(.secondary)
+                    TextField("Filter", text: $filter, prompt: Text("Filter words"))
+                        .labelsHidden()
+                        .textFieldStyle(.plain)
+                    if !filter.isEmpty {
+                        Button {
+                            filter = ""
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Clear filter")
+                    }
+                }
+                if matches.isEmpty {
+                    Text("No words match “\(filter.trimmingCharacters(in: .whitespaces))”.")
+                        .foregroundStyle(.secondary)
+                }
+                ForEach(matches) { item in
+                    row(item)
+                }
+            }
+        } header: {
+            Text(isFiltering ? "Words (\(matches.count) of \(editor.items.count))" : "Words")
         }
     }
 
