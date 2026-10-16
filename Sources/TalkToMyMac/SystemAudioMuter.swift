@@ -101,7 +101,8 @@ final class SystemAudioMuter: SystemAudioMuting, @unchecked Sendable {
 
     private static func write<T>(_ value: T, _ object: AudioObjectID, _ address: AudioObjectPropertyAddress) -> Bool {
         var address = address
-        var value = value
-        return AudioObjectSetPropertyData(object, &address, 0, nil, UInt32(MemoryLayout<T>.size), &value) == noErr
+        return withUnsafeBytes(of: value) { bytes in
+            AudioObjectSetPropertyData(object, &address, 0, nil, UInt32(bytes.count), bytes.baseAddress!) == noErr
+        }
     }
 }
