@@ -1,6 +1,7 @@
 import AppKit
 import Observation
 import SwiftUI
+import TalkToMyMacCore
 
 // MARK: - Model
 
@@ -32,10 +33,45 @@ final class FloatingIndicatorModel {
     func resetLevels() {
         levels = [Float](repeating: 0, count: Self.barCount)
     }
+
+    /// Dictionary replacements in the last paste that the user can still undo, and which
+    /// occurrences (indices into `review.occurrences`) they've put back. While set, the idle dot becomes a pill showing the count.
+    private(set) var review: ReplacementReview?
+    private(set) var reverted: Set<Int> = []
+    var isPickerOpen = false
+    /// True while the text hasn't been pasted yet and the picker is waiting for Paste or
+    /// Cancel; false when it's offering to fix a paste that already happened.
+    private(set) var isBeforePaste = false
+
+    /// The pasted text as it currently reads, given the user's choices.
+    var currentText: String? { review?.text(reverting: reverted) }
+
+    func show(_ review: ReplacementReview, beforePaste: Bool = false) {
+        self.review = review
+        reverted = []
+        isBeforePaste = beforePaste
+        isPickerOpen = beforePaste
+    }
+
+    func clearReview() {
+        review = nil
+        reverted = []
+        isBeforePaste = false
+        isPickerOpen = false
+    }
+
+    func setReverted(_ occurrence: Int, _ isReverted: Bool) {
+        if isReverted { reverted.insert(occurrence) } else { reverted.remove(occurrence) }
+    }
+
+    /// Size of the visible capsule right now. Also the draggable area.
+    var capsuleSize: CGSize {
+        phase == .idle && review != nil ? CGSize(width: 28, height: 20) : phase.capsuleSize
+    }
 }
 
 extension FloatingIndicatorModel.Phase {
-    /// Size of the visible capsule in each phase. Also the draggable area.
+    /// Size of the visible capsule in each phase, without a replacement review.
     var capsuleSize: CGSize {
         switch self {
         case .idle:       CGSize(width: 12, height: 12)
@@ -54,10 +90,24 @@ extension FloatingIndicatorModel.Phase {
 /// It's a borderless, non-activating panel, so it never steals focus from the app being
 /// dictated into (which would break paste-at-cursor). It only accepts the mouse while the
 /// pointer is over the visible capsule; the rest of the panel stays click-through.
+///
+/// After a paste with dictionary replacements, clicking the capsule (without dragging) opens
+/// a picker above it for putting back the words actually spoken. The offer lasts until the
+/// user types or clicks in another app, since either could move the cursor away from the
+/// pasted text.
+///
+/// For terminals, where a paste can't be fixed afterwards, the picker instead opens before
+/// pasting, with Paste and Cancel buttons (see `askBeforePaste`).
 @MainActor
 final class FloatingIndicatorController: NSObject {
     let model = FloatingIndicatorModel()
+    /// Rewrites the pasted text from the first string to the second in the app it went
+    /// into. Returns false if it couldn't, which ends the review.
+    var rewritePaste: ((String, String) -> Bool)?
     private let panel: NSPanel
+    private let pickerPanel: NSPanel
+    /// Resumes the paused pipeline with the text to paste, or nil to paste nothing.
+    private var pendingPaste: ((String?) -> Void)?
     private var mouseMonitors: [Any] = []
     /// Set while we move the panel ourselves, so only user drags get saved as a position.
     private var isPlacingProgrammatically = false
@@ -99,7 +149,20 @@ final class FloatingIndicatorController: NSObject {
             backing: .buffered,
             defer: false
         )
+        pickerPanel = NSPanel(
+            contentRect: .zero,
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: true
+        )
         super.init()
+
+        pickerPanel.isOpaque = false
+        pickerPanel.backgroundColor = .clear
+        pickerPanel.hasShadow = false
+        pickerPanel.level = .screenSaver
+        pickerPanel.hidesOnDeactivate = false
+        pickerPanel.isReleasedWhenClosed = false
 
         panel.isOpaque = false
         panel.backgroundColor = .clear
@@ -113,6 +176,7 @@ final class FloatingIndicatorController: NSObject {
         panel.isReleasedWhenClosed = false
         // Follow the user across Spaces and over full-screen apps.
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+        pickerPanel.collectionBehavior = panel.collectionBehavior
 
         let host = NSHostingView(rootView: FloatingIndicatorView(model: model))
         // The panel's size is fixed; don't let SwiftUI resize it as the capsule animates.
@@ -149,6 +213,41 @@ final class FloatingIndicatorController: NSObject {
             x: visible.midX - Self.panelSize.width / 2,
             y: visible.minY + Self.bottomMargin
         ))
+    }
+
+    /// Offers `review` from the indicator. Ignored while the indicator is hidden.
+    func showReview(_ review: ReplacementReview) {
+        guard isVisible else { return }
+        model.show(review)
+        updatePicker()
+    }
+
+    /// Opens the picker for `review` before anything is pasted, and calls `completion` with
+    /// the chosen text on Paste, or nil on Cancel or if a new recording starts first.
+    func askBeforePaste(_ review: ReplacementReview, completion: @escaping (String?) -> Void) {
+        finishPendingPaste(paste: false)
+        pendingPaste = completion
+        model.show(review, beforePaste: true)
+        updatePicker()
+    }
+
+    /// Ends the review; one still waiting to paste is cancelled.
+    func clearReview() {
+        guard pendingPaste == nil else {
+            finishPendingPaste(paste: false)
+            return
+        }
+        model.clearReview()
+        updatePicker()
+    }
+
+    private func finishPendingPaste(paste: Bool) {
+        guard let completion = pendingPaste else { return }
+        pendingPaste = nil
+        let text = paste ? model.currentText : nil
+        model.clearReview()
+        updatePicker()
+        completion(text)
     }
 
     /// Uses the dragged-to position if it's still on a connected screen; otherwise falls
@@ -189,7 +288,7 @@ final class FloatingIndicatorController: NSObject {
 
     /// The capsule's current rect in screen coordinates, padded for easier grabbing.
     private var capsuleScreenRect: NSRect {
-        let size = model.phase.capsuleSize
+        let size = model.capsuleSize
         let frame = panel.frame
         return NSRect(
             x: frame.midX - size.width / 2,
@@ -211,14 +310,67 @@ final class FloatingIndicatorController: NSObject {
         if let local = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .leftMouseDown], handler: { [weak self] event in
             guard let self else { return event }
             if event.type == .leftMouseDown, event.window === self.panel {
-                // Runs the system window-drag loop; `panelDidMove` saves where it lands.
+                // Runs the system window-drag loop until the mouse is released; `panelDidMove`
+                // saves where it lands. A press that didn't move it is a click.
+                let origin = self.panel.frame.origin
                 self.panel.performDrag(with: event)
+                if self.panel.frame.origin == origin, self.model.review != nil, !self.model.isBeforePaste {
+                    self.model.isPickerOpen.toggle()
+                    self.updatePicker()
+                }
                 return nil
             }
             self.updateClickThrough()
             return event
         }) {
             mouseMonitors.append(local)
+        }
+        // Global monitors only see events bound for other apps, so any of these means the
+        // user is working there again. Our own synthesized keystrokes are tagged and skipped.
+        if let other = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown, .leftMouseDown, .rightMouseDown], handler: { [weak self] event in
+            // Nothing's been pasted yet while waiting to paste, so there's no cursor to lose.
+            guard let self, self.model.review != nil, self.pendingPaste == nil,
+                  event.cgEvent?.getIntegerValueField(.eventSourceUserData) != PasteDelivery.syntheticEventTag
+            else { return }
+            self.clearReview()
+        }) {
+            mouseMonitors.append(other)
+        }
+    }
+
+    // MARK: Replacement picker
+
+    /// Shows, hides or resizes the picker to match the model, just above the capsule.
+    private func updatePicker() {
+        guard model.isPickerOpen, model.review != nil else {
+            pickerPanel.orderOut(nil)
+            return
+        }
+        let host = PickerHostingView(rootView: ReplacementPickerView(
+            model: model,
+            choose: { [weak self] occurrence, revert in self?.choose(occurrence, revert: revert) },
+            finish: { [weak self] paste in self?.finishPendingPaste(paste: paste) }
+        ))
+        let size = host.fittingSize
+        host.frame = NSRect(origin: .zero, size: size)
+        pickerPanel.contentView = host
+        let capsuleTop = panel.frame.minY + Self.capsuleBottomPadding + model.capsuleSize.height
+        var origin = NSPoint(x: panel.frame.midX - size.width / 2, y: capsuleTop + 6)
+        if let visible = (panel.screen ?? NSScreen.main)?.visibleFrame {
+            origin.x = min(max(origin.x, visible.minX + 8), visible.maxX - size.width - 8)
+            origin.y = min(origin.y, visible.maxY - size.height)
+        }
+        pickerPanel.setFrame(NSRect(origin: origin, size: size), display: true)
+        pickerPanel.orderFrontRegardless()
+    }
+
+    private func choose(_ occurrence: Int, revert: Bool) {
+        guard let old = model.currentText, model.reverted.contains(occurrence) != revert else { return }
+        model.setReverted(occurrence, revert)
+        guard !model.isBeforePaste else { return }
+        guard let new = model.currentText, rewritePaste?(old, new) == true else {
+            clearReview()
+            return
         }
     }
 
@@ -230,6 +382,7 @@ final class FloatingIndicatorController: NSObject {
     }
 
     @objc private func panelDidMove() {
+        if pickerPanel.isVisible { updatePicker() }
         guard !isPlacingProgrammatically else { return }
         savedOrigin = panel.frame.origin
     }
@@ -248,7 +401,12 @@ private struct FloatingIndicatorView: View {
         ZStack {
             switch model.phase {
             case .idle:
-                EmptyView()
+                if let review = model.review {
+                    Text("\(review.occurrences.count)")
+                        .font(.system(size: 11, weight: .semibold).monospacedDigit())
+                        .foregroundStyle(.white)
+                        .transition(.opacity)
+                }
             case .recording:
                 HStack(spacing: 8) {
                     Circle()
@@ -262,11 +420,11 @@ private struct FloatingIndicatorView: View {
                     .transition(.opacity)
             }
         }
-        .frame(width: model.phase.capsuleSize.width, height: model.phase.capsuleSize.height)
+        .frame(width: model.capsuleSize.width, height: model.capsuleSize.height)
         .background(Capsule().fill(.black.opacity(0.72)))
         .overlay(Capsule().strokeBorder(.white.opacity(0.4), lineWidth: 1))
         .shadow(color: .black.opacity(0.3), radius: 3, y: 1)
-        .animation(.spring(duration: 0.35, bounce: 0.25), value: model.phase)
+        .animation(.spring(duration: 0.35, bounce: 0.25), value: model.capsuleSize)
         // Grow upward from the resting spot rather than from the panel's centre.
         .padding(.bottom, FloatingIndicatorController.capsuleBottomPadding)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
@@ -299,5 +457,80 @@ private struct ProcessingSpinner: View {
                 .frame(width: 14, height: 14)
                 .rotationEffect(.degrees(turns * 360))
         }
+    }
+}
+
+/// Lets the picker's buttons respond to the first click, since its panel never becomes key.
+private final class PickerHostingView<Content: View>: NSHostingView<Content> {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
+
+/// One group per replaced occurrence, shown in a few words of context: the dictionary's
+/// written form or what was actually said. White on black, like the capsule.
+private struct ReplacementPickerView: View {
+    let model: FloatingIndicatorModel
+    let choose: (_ occurrence: Int, _ revert: Bool) -> Void
+    /// Before pasting: Paste (true) or Cancel (false).
+    let finish: (_ paste: Bool) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if let review = model.review {
+                ForEach(review.occurrences.indices, id: \.self) { index in
+                    let occurrence = review.occurrences[index]
+                    let reverted = model.reverted.contains(index)
+                    let context = review.context(of: index)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("\(context.before)\(Text(reverted ? occurrence.original : occurrence.written).bold().foregroundStyle(.white))\(context.after)")
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.6))
+                            .lineLimit(2)
+                            .frame(maxWidth: 260, alignment: .leading)
+                        option(occurrence.written, selected: !reverted) { choose(index, false) }
+                        option(occurrence.original, note: "original", selected: reverted) { choose(index, true) }
+                    }
+                }
+            }
+            if model.isBeforePaste {
+                HStack(spacing: 8) {
+                    Spacer()
+                    Button("Cancel") { finish(false) }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.white.opacity(0.6))
+                    Button { finish(true) } label: {
+                        Text("Paste")
+                            .foregroundStyle(.black)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 3)
+                            .background(Capsule().fill(.white))
+                    }
+                    .buttonStyle(.plain)
+                }
+                .font(.system(size: 12, weight: .medium))
+            }
+        }
+        .padding(12)
+        .frame(minWidth: 160, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 10).fill(.black.opacity(0.72)))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.white.opacity(0.4), lineWidth: 1))
+        .fixedSize()
+    }
+
+    private func option(_ word: String, note: String? = nil, selected: Bool,
+                        action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Image(systemName: selected ? "largecircle.fill.circle" : "circle")
+                    .font(.system(size: 11))
+                Text(word)
+                if let note {
+                    Text("(\(note))").foregroundStyle(.white.opacity(0.6))
+                }
+            }
+            .font(.system(size: 13))
+            .foregroundStyle(.white)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }

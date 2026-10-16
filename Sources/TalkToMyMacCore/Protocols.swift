@@ -52,6 +52,14 @@ public protocol TextCleaning: AnyObject {
     func clean(_ text: String) -> String?
 }
 
+/// Lets the user check the cleaned transcript before it's formatted and delivered, e.g. to
+/// undo dictionary replacements before pasting into an app where they can't be fixed later.
+public protocol TranscriptReviewing: AnyObject {
+    /// The text to carry on with (`cleaned`, or the user's edit of it), or nil to deliver
+    /// nothing. `raw` is the untouched transcript `cleaned` was made from.
+    func review(raw: String, cleaned: String) async -> String?
+}
+
 /// Text post-processor / formatter (e.g., LLM cleanup).
 public protocol TextFormatting: AnyObject {
     /// Whether a transcript of this many words should be formatted at all. When false, the

@@ -76,7 +76,7 @@ struct ModelsView: View {
             } footer: {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("With Groq selected, each transcript and your formatting instructions "
-                         + "(including the dictionary) are sent to Groq's servers. "
+                         + "are sent to Groq's servers. "
                          + "If a request fails, the raw transcript is delivered instead. "
                          + "Prices start at Groq's list price; update them if Groq's pricing "
                          + "changes. They're used for cost estimates on the Instrumentation tab.")

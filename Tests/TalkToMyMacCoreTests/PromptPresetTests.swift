@@ -31,15 +31,18 @@ final class PromptPresetTests: XCTestCase {
         XCTAssertEqual(PromptPreset.allCases.first, .coding)
     }
 
-    func testCodingPresetEmbedsDictionaryPlaceholderOnce() throws {
-        let text = try XCTUnwrap(PromptPreset.coding.instructions)
-        XCTAssertEqual(text.components(separatedBy: FormattingInstructions.dictionaryPlaceholder).count - 1, 1)
-        XCTAssertTrue(text.contains("<dictionary>\n{{DICTIONARY}}\n</dictionary>"))
+    /// The dictionary is applied deterministically before formatting, so no prompt mentions it.
+    func testNoPresetMentionsTheDictionary() throws {
+        for preset in PromptPreset.allCases where preset != .custom {
+            let text = try XCTUnwrap(preset.instructions)
+            XCTAssertFalse(text.lowercased().contains("dictionary"), "\(preset) should not mention the dictionary")
+            XCTAssertFalse(text.contains("{{"), "\(preset) should have no template placeholders")
+        }
     }
 
     func testCodingPresetContainsKeySections() throws {
         let text = try XCTUnwrap(PromptPreset.coding.instructions)
-        for tag in ["<critical_rule>", "<output_format>", "<cleanup_rules>", "<dictionary_rules>",
+        for tag in ["<critical_rule>", "<output_format>", "<cleanup_rules>",
                     "<spoken_formatting>", "<examples>"] {
             XCTAssertTrue(text.contains(tag), "Coding prompt should contain \(tag)")
         }

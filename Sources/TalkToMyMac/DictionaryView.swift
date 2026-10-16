@@ -29,19 +29,6 @@ struct DictionaryView: View {
 
     private var listPage: some View {
         Form {
-            if !settings.resolvedInstructionsHavePlaceholder {
-                Section {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Label("The \(settings.preset.displayName) preset only gets a short version of "
-                              + "the dictionary rules, which the on-device model follows poorly.",
-                              systemImage: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.orange)
-                            .font(.caption)
-                        Button("Use Coding Dictation Preset") { settings.preset = .coding }
-                    }
-                }
-            }
-
             Section {
                 HStack {
                     TextField("Add a word or phrase, e.g. OTel", text: $newWord)
