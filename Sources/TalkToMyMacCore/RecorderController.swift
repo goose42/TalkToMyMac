@@ -16,6 +16,7 @@ public class RecorderController: @unchecked Sendable {
     private let indicator: RecordingIndicator
     private let transcriber: SpeechTranscribing?
     private let cleaner: TextCleaning?
+    private let reviewer: TranscriptReviewing?
     private let formatter: TextFormatting?
     private let outputSink: OutputDelivering?
     private let denoiser: AudioDenoising?
@@ -27,6 +28,7 @@ public class RecorderController: @unchecked Sendable {
         indicator: RecordingIndicator,
         transcriber: SpeechTranscribing? = nil,
         cleaner: TextCleaning? = nil,
+        reviewer: TranscriptReviewing? = nil,
         formatter: TextFormatting? = nil,
         outputSink: OutputDelivering? = nil,
         denoiser: AudioDenoising? = nil,
@@ -37,6 +39,7 @@ public class RecorderController: @unchecked Sendable {
         self.indicator = indicator
         self.transcriber = transcriber
         self.cleaner = cleaner
+        self.reviewer = reviewer
         self.formatter = formatter
         self.outputSink = outputSink
         self.denoiser = denoiser
@@ -129,7 +132,7 @@ public class RecorderController: @unchecked Sendable {
         return .success(())
     }
 
-    /// Process recorded audio through the pipeline: denoise → transcribe → clean → format → deliver.
+    /// Process recorded audio through the pipeline: denoise → transcribe → clean → review → format → deliver.
     /// Returns the raw and final text plus step timings, or nil if any required step fails.
     @discardableResult
     public func processRecording(samples: [Float], sampleRate: Double) async -> PipelineResult? {
@@ -150,15 +153,27 @@ public class RecorderController: @unchecked Sendable {
 
         // 3. Clean (optional — deterministic, no model). Cleaning a transcript down to
         //    nothing (e.g. just "um") counts as hearing nothing.
-        let cleanedText = cleaner?.clean(rawText)
+        var cleanedText = cleaner?.clean(rawText)
         if cleanedText?.isEmpty == true { return nil }
-        let cleanText = cleanedText ?? rawText
+        var cleanText = cleanedText ?? rawText
+
+        // 3b. Review (optional — the user may change the cleaned text, or cancel the paste;
+        //     a cancelled transcript is still returned for history, just not formatted or delivered)
+        var cancelled = false
+        if let reviewer {
+            if let reviewed = await reviewer.review(raw: rawText, cleaned: cleanText) {
+                if reviewed != cleanText { cleanedText = reviewed }
+                cleanText = reviewed
+            } else {
+                cancelled = true
+            }
+        }
 
         // 4. Format (optional — falls back to the cleaned text on any failure, and skipped
         //    entirely when the formatter declines a transcript this short)
         var outcome: FormattingOutcome?
         var formattingDuration: Duration?
-        if let formatter, formatter.shouldFormat(wordCount: WordDiff.wordCount(cleanText)) {
+        if !cancelled, let formatter, formatter.shouldFormat(wordCount: WordDiff.wordCount(cleanText)) {
             let formatStart = clock.now
             outcome = await formatter.format(raw: cleanText)
             formattingDuration = clock.now - formatStart
@@ -167,7 +182,7 @@ public class RecorderController: @unchecked Sendable {
         let finalText = formattedText ?? cleanText
 
         // 5. Deliver (optional — failure is non-fatal)
-        if let sink = outputSink {
+        if !cancelled, let sink = outputSink {
             try? sink.deliver(text: finalText)
         }
 

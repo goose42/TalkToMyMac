@@ -37,9 +37,9 @@ final class FormattingSettings: @unchecked Sendable {
         didSet { UserDefaults.standard.set(isEnabled, forKey: Keys.llmFormattingEnabled) }
     }
 
-    /// Whether the model-free cleanup step (fillers, repairs, voice commands, dictionary fixes)
-    /// runs before formatting. Independent of `isEnabled`: with the LLM off, its output is
-    /// what gets delivered.
+    /// Whether the model-free cleanup step (fillers, repairs, voice commands, numbers, email
+    /// layout) runs before formatting. Dictionary fixes run regardless. Independent of
+    /// `isEnabled`: with the LLM off, its output is what gets delivered.
     var deterministicCleanupEnabled: Bool {
         didSet { UserDefaults.standard.set(deterministicCleanupEnabled, forKey: Keys.deterministicCleanupEnabled) }
     }
@@ -178,19 +178,8 @@ final class FormattingSettings: @unchecked Sendable {
 
     /// The system prompt actually sent to the model. Falls back to the default preset if
     /// the editor is somehow empty (e.g. `.custom` selected with nothing typed yet), rather
-    /// than sending an empty instructions string. The custom dictionary is inserted at the
-    /// prompt's `{{DICTIONARY}}` placeholder, or appended if it has none.
+    /// than sending an empty instructions string.
     var resolvedInstructions: String {
-        FormattingInstructions.compose(base: baseInstructions, dictionary: dictionaryEntries)
-    }
-
-    /// Whether the active instructions place the dictionary themselves (and so carry the
-    /// full dictionary rules), rather than getting the short appended version.
-    var resolvedInstructionsHavePlaceholder: Bool {
-        baseInstructions.contains(FormattingInstructions.dictionaryPlaceholder)
-    }
-
-    private var baseInstructions: String {
         customInstructions.isEmpty ? (PromptPreset.default.instructions ?? "") : customInstructions
     }
 

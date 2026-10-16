@@ -37,6 +37,19 @@ final class DeterministicCleanupTests: XCTestCase {
                        "Wir deployen das auf Kubernetes heute Abend")
     }
 
+    func testApplyDictionaryOnlySwapsTermsAndLeavesFillers() {
+        let dictionary = [
+            DictionaryEntry(written: "OTel", type: .acronym, soundsLike: ["hotel"]),
+            DictionaryEntry(written: "question mark", type: .noun, soundsLike: ["Kocia Mark"]),
+        ]
+        XCTAssertEqual(DeterministicCleanup.applyDictionary("um add hotel tracing Kocia Mark", dictionary: dictionary),
+                       "um add OTel tracing question mark")
+    }
+
+    func testApplyDictionaryWithEmptyDictionaryReturnsInput() {
+        XCTAssertEqual(DeterministicCleanup.applyDictionary("um hello there", dictionary: []), "um hello there")
+    }
+
     func testFillerOnlyTextBecomesEmpty() {
         XCTAssertEqual(DeterministicCleanup.apply("uh, um... hmm", dictionary: []), "")
     }

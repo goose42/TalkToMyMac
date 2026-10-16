@@ -18,9 +18,10 @@ struct FormattingView: View {
                 Text("Cleanup")
             } footer: {
                 Text("Removes filler words, self-corrections and stutters, turns spoken punctuation "
-                     + "(“comma”, “new line”), numbers and dictated emails into text, "
-                     + "and applies your dictionary’s sounds-like fixes — without a model. "
-                     + "Runs before LLM formatting, and on its own when LLM formatting is off.")
+                     + "(“comma”, “new line”), numbers and dictated emails into text — "
+                     + "without a model. Runs before LLM formatting, and on its own when LLM "
+                     + "formatting is off. Your dictionary’s sounds-like fixes always apply, "
+                     + "whether or not this is on.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

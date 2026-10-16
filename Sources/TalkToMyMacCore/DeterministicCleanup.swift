@@ -14,4 +14,9 @@ public enum DeterministicCleanup {
         return DictionaryReplacement.apply(dictionary, to: spoken)
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
+
+    /// Swaps in the dictionary's written forms and nothing else, for when full cleanup is off.
+    public static func applyDictionary(_ text: String, dictionary: [DictionaryEntry]) -> String {
+        DictionaryReplacement.apply(dictionary, to: DictionaryReplacement.commands(dictionary, in: text))
+    }
 }

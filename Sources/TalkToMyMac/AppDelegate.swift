@@ -54,6 +54,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
         // Always-on-top dot that becomes a live waveform while recording.
         floatingIndicator = FloatingIndicatorController()
+        floatingIndicator.rewritePaste = { [weak self] old, new in
+            self?.pasteDelivery.replaceLastPaste(old, with: new) ?? false
+        }
         let indicatorModel = floatingIndicator.model
         audioCapture.onLevels = { levels in
             DispatchQueue.main.async {
@@ -78,13 +81,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         systemAudioMuter = SystemAudioMuter(settings: formattingSettings)
 
         // Build the RecorderController: mic → Apple Speech or Parakeet (both on-device) →
-        // optional deterministic cleanup → Foundation Models or Groq → paste.
+        // optional deterministic cleanup → (terminals: pick replacements) → Foundation Models
+        // or Groq → paste.
         controller = RecorderController(
             recorder: audioCapture,
             permissionChecker: self,
             indicator: self,
             transcriber: transcriptionRouter,
             cleaner: CleanupRouter(settings: formattingSettings),
+            reviewer: TerminalReviewer(settings: formattingSettings, indicator: floatingIndicator),
             formatter: FormattingRouter(settings: formattingSettings, onDevice: formatter, groq: groqFormatter),
             outputSink: pasteDelivery,
             systemAudio: systemAudioMuter
@@ -315,10 +320,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             if let result = await self.controller.processRecording(samples: rawSamples, sampleRate: sampleRate) {
                 print("[Pipeline] Transcript: \(result.finalText)")
                 self.transcriptionStore.insert(result, audioSeconds: duration)
+                self.offerReplacementReview(for: result)
             } else {
                 print("[Pipeline] Transcription returned nil (model not ready or empty result)")
             }
         }
+    }
+
+    /// If `result` was just pasted and the dictionary replaced words in it, lets the user
+    /// put the spoken words back from the floating indicator. Replacements whose written form
+    /// didn't survive formatting are left out, since there'd be nothing to revert.
+    private func offerReplacementReview(for result: PipelineResult) {
+        // Terminals were already asked before pasting (`TerminalReviewer`), and can't be fixed now.
+        guard pasteDelivery.lastPaste?.text == result.finalText, !TerminalApps.isFrontmost,
+              let review = ReplacementReview(raw: result.rawText, text: result.finalText,
+                                             dictionary: formattingSettings.dictionaryEntries)
+        else { return }
+        floatingIndicator.showReview(review)
     }
 
     // MARK: RecordingIndicator
@@ -333,6 +351,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         DispatchQueue.main.async { [weak self] in
             if let indicator = self?.floatingIndicator {
                 if recording {
+                    indicator.clearReview()
                     indicator.moveToActiveScreen()
                     indicator.model.resetLevels()
                 }

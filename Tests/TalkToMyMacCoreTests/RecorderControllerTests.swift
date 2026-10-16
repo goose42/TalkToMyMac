@@ -124,6 +124,22 @@ final class MockCleaner: TextCleaning {
     }
 }
 
+final class MockReviewer: TranscriptReviewing {
+    var reviewResult: String?
+    var lastRaw: String?
+    var lastCleaned: String?
+
+    init(result: String?) {
+        self.reviewResult = result
+    }
+
+    func review(raw: String, cleaned: String) async -> String? {
+        lastRaw = raw
+        lastCleaned = cleaned
+        return reviewResult
+    }
+}
+
 final class MockOutputSink: OutputDelivering {
     var deliverCallCount = 0
     var lastText: String?
@@ -170,6 +186,7 @@ private func makeController(
     indicator: MockIndicator? = nil,
     transcriber: MockTranscriber? = nil,
     cleaner: MockCleaner? = nil,
+    reviewer: MockReviewer? = nil,
     formatter: MockFormatter? = nil,
     outputSink: MockOutputSink? = nil,
     denoiser: MockDenoiser? = nil,
@@ -184,6 +201,7 @@ private func makeController(
         indicator: ind,
         transcriber: transcriber,
         cleaner: cleaner,
+        reviewer: reviewer,
         formatter: formatter,
         outputSink: outputSink,
         denoiser: denoiser,
@@ -582,6 +600,51 @@ final class RecorderControllerTests: XCTestCase {
         XCTAssertNil(result)
         XCTAssertEqual(formatter.formatCallCount, 0)
         XCTAssertEqual(sink.deliverCallCount, 0)
+    }
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // MARK: Pipeline — Reviewer
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    func testReviewedTextIsFormattedAndDelivered() async {
+        let transcriber = MockTranscriber(result: "use the rest API")
+        let cleaner = MockCleaner(result: "use the REST API")
+        let reviewer = MockReviewer(result: "use the rest API!")
+        let formatter = MockFormatter(result: nil)
+        let sink = MockOutputSink()
+        let (ctrl, _, _, _) = makeController(transcriber: transcriber, cleaner: cleaner, reviewer: reviewer,
+                                             formatter: formatter, outputSink: sink)
+        let result = await ctrl.processRecording(samples: [1.0], sampleRate: 16000)
+        XCTAssertEqual(reviewer.lastRaw, "use the rest API")
+        XCTAssertEqual(reviewer.lastCleaned, "use the REST API")
+        XCTAssertEqual(formatter.lastInput, "use the rest API!")
+        XCTAssertEqual(result?.cleanedText, "use the rest API!")
+        XCTAssertEqual(sink.lastText, "use the rest API!")
+    }
+
+    func testReviewerSeesRawTextWhenCleanupIsOff() async {
+        let transcriber = MockTranscriber(result: "hello world")
+        let reviewer = MockReviewer(result: "hello world")
+        let (ctrl, _, _, _) = makeController(transcriber: transcriber, reviewer: reviewer)
+        let result = await ctrl.processRecording(samples: [1.0], sampleRate: 16000)
+        XCTAssertEqual(reviewer.lastCleaned, "hello world")
+        XCTAssertNil(result?.cleanedText)
+    }
+
+    /// A cancelled review still keeps the transcript for history; it just isn't formatted or pasted.
+    func testCancelledReviewSkipsFormattingAndDelivery() async {
+        let transcriber = MockTranscriber(result: "use the rest API")
+        let cleaner = MockCleaner(result: "use the REST API")
+        let reviewer = MockReviewer(result: nil)
+        let formatter = MockFormatter(result: "Use the REST API.")
+        let sink = MockOutputSink()
+        let (ctrl, _, _, _) = makeController(transcriber: transcriber, cleaner: cleaner, reviewer: reviewer,
+                                             formatter: formatter, outputSink: sink)
+        let result = await ctrl.processRecording(samples: [1.0], sampleRate: 16000)
+        XCTAssertEqual(formatter.formatCallCount, 0)
+        XCTAssertEqual(sink.deliverCallCount, 0)
+        XCTAssertEqual(result?.finalText, "use the REST API")
+        XCTAssertEqual(result?.llmApplied, false)
     }
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

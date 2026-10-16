@@ -95,8 +95,12 @@ Open Settings from the menu bar item (⌘,) to:
   so if one doesn't respond, something else probably owns it — pick another.
 - Check on-device Speech model status and trigger a download.
 - Enable deterministic cleanup: a model-free pass that drops fillers ("um"), self-corrections
-  and stutters, turns spoken punctuation, numbers and "write an email to…" into text, and
-  applies the dictionary's sounds-like fixes. It runs before LLM formatting, or on its own.
+  and stutters, turns spoken punctuation, numbers and "write an email to…" into text. It runs
+  before LLM formatting, or on its own. The dictionary's sounds-like fixes always run, also
+  without a model, and the LLM never sees the dictionary.
+  If it replaced words in a dictation, the floating indicator shows how many; click it to
+  switch any of them back to what you said. In a terminal, where a paste can't be fixed
+  afterwards, the choices pop up before pasting instead, with Paste and Cancel buttons.
 - Enable/disable LLM formatting and pick a preset (Clean Up, Verbatim, Email, Code Comment,
   or a fully custom system prompt).
 - Enable/disable auto-paste at the cursor.

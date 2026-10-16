@@ -14,8 +14,26 @@ public enum DictionaryReplacement {
         replacing(entries.filter { VoiceCommands.isSpokenCommand($0.written) }, in: text)
     }
 
+    /// Where `apply` would swap in a term (not a spoken command) in `text`, in order.
+    static func termMatches(_ entries: [DictionaryEntry], in text: String) -> [(range: NSRange, written: String)] {
+        matches(entries.filter { !VoiceCommands.isSpokenCommand($0.written) }, in: text)
+    }
+
+    /// Letters, marks, digits and underscores count as word characters on either side.
+    static let wordBoundaryBefore = "(?<![\\p{L}\\p{M}\\p{N}_])"
+    static let wordBoundaryAfter = "(?![\\p{L}\\p{M}\\p{N}_])"
+
     /// One pass avoids cascading replacements; Unicode boundaries preserve words like café.
     private static func replacing(_ entries: [DictionaryEntry], in text: String) -> String {
+        let output = NSMutableString(string: text)
+        for match in matches(entries, in: text).reversed() {
+            output.replaceCharacters(in: match.range, with: match.written)
+        }
+        return output as String
+    }
+
+    /// Every sounds-like phrase found in `text`, longest phrase first where they overlap.
+    private static func matches(_ entries: [DictionaryEntry], in text: String) -> [(range: NSRange, written: String)] {
         let pairs = entries.flatMap { entry in
             entry.soundsLike
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -23,20 +41,17 @@ public enum DictionaryReplacement {
                 .map { (phrase: $0, written: entry.written) }
         }
         .sorted { $0.phrase.count > $1.phrase.count }
-        guard !pairs.isEmpty else { return text }
+        guard !pairs.isEmpty else { return [] }
         let alternatives = pairs.map { NSRegularExpression.escapedPattern(for: $0.phrase) }.joined(separator: "|")
         guard let regex = try? NSRegularExpression(
-            pattern: "(?<![\\p{L}\\p{M}\\p{N}_])(?:\(alternatives))(?![\\p{L}\\p{M}\\p{N}_])",
+            pattern: wordBoundaryBefore + "(?:\(alternatives))" + wordBoundaryAfter,
             options: .caseInsensitive
-        ) else { return text }
+        ) else { return [] }
         let source = text as NSString
-        let output = NSMutableString(string: text)
-        for match in regex.matches(in: text, range: NSRange(location: 0, length: source.length)).reversed() {
+        return regex.matches(in: text, range: NSRange(location: 0, length: source.length)).compactMap { match in
             let phrase = source.substring(with: match.range)
-            if let pair = pairs.first(where: { $0.phrase.caseInsensitiveCompare(phrase) == .orderedSame }) {
-                output.replaceCharacters(in: match.range, with: pair.written)
-            }
+            return pairs.first { $0.phrase.caseInsensitiveCompare(phrase) == .orderedSame }
+                .map { (range: match.range, written: $0.written) }
         }
-        return output as String
     }
 }
