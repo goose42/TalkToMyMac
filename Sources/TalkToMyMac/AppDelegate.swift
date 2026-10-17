@@ -85,7 +85,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
         // Build the RecorderController: mic → Apple Speech or Parakeet (both on-device) →
         // optional deterministic cleanup → (terminals: pick replacements) → Foundation Models
-        // or a remote provider → paste.
+        // or a remote provider → paste → save the audio as AAC.
         controller = RecorderController(
             recorder: audioCapture,
             permissionChecker: self,
@@ -96,7 +96,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             formatter: FormattingRouter(settings: formattingSettings, onDevice: formatter, groq: groqFormatter,
                                         openRouter: openRouterFormatter, notices: floatingIndicator),
             outputSink: pasteDelivery,
-            systemAudio: systemAudioMuter
+            systemAudio: systemAudioMuter,
+            archiver: RecordingArchiver()
         )
 
         // Status bar item

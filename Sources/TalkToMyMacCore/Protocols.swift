@@ -1,8 +1,18 @@
+import Foundation
+
 /// Audio recording (start/stop microphone capture).
 public protocol AudioRecording: AnyObject {
     func start() throws
     func stop() throws
     var isRecording: Bool { get }
+}
+
+/// Keeps a finished recording, e.g. as a compressed file on disk. Called once the pipeline
+/// is done with the audio, so implementations should hand the work off rather than block.
+public protocol RecordingArchiving: AnyObject {
+    /// `id` is the dictation's `PipelineResult.recordingID`, so the recording can be found
+    /// from its transcript.
+    func archive(samples: [Float], sampleRate: Double, id: UUID)
 }
 
 /// Microphone permission checking and requesting.

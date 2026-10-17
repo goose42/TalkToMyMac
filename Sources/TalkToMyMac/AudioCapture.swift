@@ -1,13 +1,11 @@
 import AVFoundation
 import TalkToMyMacCore
 
-/// Captures microphone audio via AVAudioEngine and writes to a WAV file in the cache directory.
-/// Also keeps the raw PCM samples in memory so callers can skip re-reading from disk.
+/// Captures microphone audio via AVAudioEngine into memory. Nothing is written while recording;
+/// finished dictations are saved afterwards by `RecordingArchiver`.
 final class AudioCapture: AudioRecording {
     private let engine = AVAudioEngine()
-    private var audioFile: AVAudioFile?
     private(set) var isRecording = false
-    private(set) var lastRecordingPath: String?
 
     /// In-memory accumulation of raw Float32 samples (channel 0) captured during recording.
     private(set) var lastRecordingRawSamples: [Float]?
@@ -27,6 +25,19 @@ final class AudioCapture: AudioRecording {
     /// Subdirectory where audio recordings are saved.
     static var recordingsDirectory: URL {
         dataDirectory.appendingPathComponent("Recordings", isDirectory: true)
+    }
+
+    /// File name of the recording saved for the dictation with `id` (its transcript's ID).
+    static func recordingFileName(id: String) -> String {
+        "recording-\(id).m4a"
+    }
+
+    /// The saved recording of the dictation with `id`, if it's on disk. WAVs are from older
+    /// builds, matched to their transcripts by `scripts/link-recordings.sh`.
+    static func recordingURL(id: String) -> URL? {
+        let m4a = recordingsDirectory.appendingPathComponent(recordingFileName(id: id))
+        let wav = m4a.deletingPathExtension().appendingPathExtension("wav")
+        return [m4a, wav].first { FileManager.default.fileExists(atPath: $0.path) }
     }
 
     /// Number and total size of the saved recordings.
@@ -50,7 +61,8 @@ final class AudioCapture: AudioRecording {
             at: recordingsDirectory, includingPropertiesForKeys: [.fileSizeKey],
             options: .skipsHiddenFiles
         )) ?? []
-        return files.filter { $0.pathExtension.lowercased() == "wav" }
+        // WAVs are from older builds, which wrote them live while recording.
+        return files.filter { ["m4a", "wav"].contains($0.pathExtension.lowercased()) }
     }
 
 
@@ -64,35 +76,10 @@ final class AudioCapture: AudioRecording {
         // Reset in-memory buffer
         var accumulatedSamples: [Float] = []
 
-        // Create recordings subdirectory
-        let recordingsDir = Self.recordingsDirectory
-        try FileManager.default.createDirectory(at: recordingsDir, withIntermediateDirectories: true)
-
-        let fileName = "recording-\(UUID().uuidString).wav"
-        let fileURL = recordingsDir.appendingPathComponent(fileName)
-        lastRecordingPath = fileURL.path
-
-        // PCM Int16 WAV output at the input node's sample rate
-        guard let wavFormat = AVAudioFormat(
-            commonFormat: .pcmFormatInt16,
-            sampleRate: recordingFormat.sampleRate,
-            channels: recordingFormat.channelCount,
-            interleaved: true
-        ) else {
-            throw NSError(domain: "AudioCapture", code: 1, userInfo: [
-                NSLocalizedDescriptionKey: "Failed to create WAV format"
-            ])
-        }
-
-        audioFile = try AVAudioFile(forWriting: fileURL, settings: wavFormat.settings)
-
         let onLevels = self.onLevels
         let levelChunkSize = max(Int(recordingFormat.sampleRate / 30), 1)
 
-        inputNode.installTap(onBus: 0, bufferSize: 4096, format: recordingFormat) { [weak self] buffer, _ in
-            // Write to disk
-            try? self?.audioFile?.write(from: buffer)
-
+        inputNode.installTap(onBus: 0, bufferSize: 4096, format: recordingFormat) { buffer, _ in
             // Accumulate in memory (channel 0, float32)
             if let channelData = buffer.floatChannelData {
                 let frameCount = Int(buffer.frameLength)
@@ -115,7 +102,6 @@ final class AudioCapture: AudioRecording {
     func stop() throws {
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
-        audioFile = nil
         isRecording = false
 
         // Snapshot the accumulated samples
@@ -134,13 +120,9 @@ final class AudioCapture: AudioRecording {
         }
     }
 
-    /// Throws away the most recent (already stopped) recording: drops the in-memory
-    /// samples and deletes the WAV from disk, so a discarded dictation leaves no trace.
+    /// Throws away the most recent (already stopped) recording. It was never written to
+    /// disk, so dropping the in-memory samples leaves no trace.
     func discardLastRecording() {
         lastRecordingRawSamples = nil
-        if let path = lastRecordingPath {
-            try? FileManager.default.removeItem(atPath: path)
-        }
-        lastRecordingPath = nil
     }
 }

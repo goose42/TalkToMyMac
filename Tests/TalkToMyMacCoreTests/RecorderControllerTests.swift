@@ -178,6 +178,23 @@ final class MockSystemAudio: SystemAudioMuting {
     func restoreAfterRecording() { restoreCallCount += 1 }
 }
 
+final class MockArchiver: RecordingArchiving {
+    var archiveCallCount = 0
+    var lastSamples: [Float]?
+    var lastSampleRate: Double?
+    var lastID: UUID?
+    /// Runs inside `archive`, so a test can see what the pipeline had done by then.
+    var onArchive: (() -> Void)?
+
+    func archive(samples: [Float], sampleRate: Double, id: UUID) {
+        archiveCallCount += 1
+        lastID = id
+        lastSamples = samples
+        lastSampleRate = sampleRate
+        onArchive?()
+    }
+}
+
 // MARK: - Helpers
 
 private func makeController(
@@ -190,7 +207,8 @@ private func makeController(
     formatter: MockFormatter? = nil,
     outputSink: MockOutputSink? = nil,
     denoiser: MockDenoiser? = nil,
-    systemAudio: MockSystemAudio? = nil
+    systemAudio: MockSystemAudio? = nil,
+    archiver: MockArchiver? = nil
 ) -> (RecorderController, MockRecorder, MockPermissionChecker, MockIndicator) {
     let rec = recorder ?? MockRecorder()
     let perm = MockPermissionChecker(permission: permission)
@@ -205,7 +223,8 @@ private func makeController(
         formatter: formatter,
         outputSink: outputSink,
         denoiser: denoiser,
-        systemAudio: systemAudio
+        systemAudio: systemAudio,
+        archiver: archiver
     )
     return (ctrl, rec, perm, ind)
 }
@@ -990,5 +1009,96 @@ final class RecorderControllerTests: XCTestCase {
         XCTAssertEqual(result?.finalText, "Formatted Text")
         XCTAssertEqual(result?.llmApplied, true)
         XCTAssertNotNil(result?.formattingDuration)
+    }
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // MARK: Pipeline — Archiving
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    func testProcessRecordingArchivesRawSamplesNotDenoised() async {
+        let archiver = MockArchiver()
+        let (ctrl, _, _, _) = makeController(transcriber: MockTranscriber(),
+                                             denoiser: MockDenoiser(result: [0.5]), archiver: archiver)
+        _ = await ctrl.processRecording(samples: [1.0, 2.0, 3.0], sampleRate: 48000)
+        XCTAssertEqual(archiver.archiveCallCount, 1)
+        XCTAssertEqual(archiver.lastSamples, [1.0, 2.0, 3.0])
+        XCTAssertEqual(archiver.lastSampleRate, 48000)
+    }
+
+    func testProcessRecordingArchivesAfterDelivery() async {
+        let sink = MockOutputSink()
+        let archiver = MockArchiver()
+        var deliveriesBeforeArchive: Int?
+        archiver.onArchive = { deliveriesBeforeArchive = sink.deliverCallCount }
+        let (ctrl, _, _, _) = makeController(transcriber: MockTranscriber(), outputSink: sink, archiver: archiver)
+        _ = await ctrl.processRecording(samples: [1.0], sampleRate: 16000)
+        XCTAssertEqual(deliveriesBeforeArchive, 1)
+    }
+
+    func testProcessRecordingArchivesWhenTranscriberNotReady() async {
+        let archiver = MockArchiver()
+        let (ctrl, _, _, _) = makeController(transcriber: MockTranscriber(isReady: false), archiver: archiver)
+        let result = await ctrl.processRecording(samples: [1.0], sampleRate: 16000)
+        XCTAssertNil(result)
+        XCTAssertEqual(archiver.archiveCallCount, 1)
+    }
+
+    func testProcessRecordingArchivesWhenNothingWasHeard() async {
+        let archiver = MockArchiver()
+        let (ctrl, _, _, _) = makeController(transcriber: MockTranscriber(result: nil), archiver: archiver)
+        let result = await ctrl.processRecording(samples: [1.0], sampleRate: 16000)
+        XCTAssertNil(result)
+        XCTAssertEqual(archiver.archiveCallCount, 1)
+    }
+
+    func testProcessRecordingArchivesWhenCleanedToNothing() async {
+        let archiver = MockArchiver()
+        let (ctrl, _, _, _) = makeController(transcriber: MockTranscriber(result: "um"),
+                                             cleaner: MockCleaner(result: ""), archiver: archiver)
+        let result = await ctrl.processRecording(samples: [1.0], sampleRate: 16000)
+        XCTAssertNil(result)
+        XCTAssertEqual(archiver.archiveCallCount, 1)
+    }
+
+    func testProcessRecordingArchivesWhenReviewCancels() async {
+        let sink = MockOutputSink()
+        let archiver = MockArchiver()
+        let (ctrl, _, _, _) = makeController(transcriber: MockTranscriber(), reviewer: MockReviewer(result: nil),
+                                             outputSink: sink, archiver: archiver)
+        _ = await ctrl.processRecording(samples: [1.0], sampleRate: 16000)
+        XCTAssertEqual(sink.deliverCallCount, 0)
+        XCTAssertEqual(archiver.archiveCallCount, 1)
+    }
+
+    func testProcessRecordingArchivesOncePerRecording() async {
+        let archiver = MockArchiver()
+        let (ctrl, _, _, _) = makeController(transcriber: MockTranscriber(), archiver: archiver)
+        _ = await ctrl.processRecording(samples: [1.0], sampleRate: 16000)
+        _ = await ctrl.processRecording(samples: [2.0], sampleRate: 16000)
+        XCTAssertEqual(archiver.archiveCallCount, 2)
+        XCTAssertEqual(archiver.lastSamples, [2.0])
+    }
+
+    func testProcessRecordingArchivesUnderTheResultsRecordingID() async {
+        let archiver = MockArchiver()
+        let (ctrl, _, _, _) = makeController(transcriber: MockTranscriber(), archiver: archiver)
+        let result = await ctrl.processRecording(samples: [1.0], sampleRate: 16000)
+        XCTAssertNotNil(result?.recordingID)
+        XCTAssertEqual(archiver.lastID, result?.recordingID)
+    }
+
+    func testProcessRecordingUsesANewRecordingIDEachTime() async {
+        let archiver = MockArchiver()
+        let (ctrl, _, _, _) = makeController(transcriber: MockTranscriber(), archiver: archiver)
+        let first = await ctrl.processRecording(samples: [1.0], sampleRate: 16000)
+        let second = await ctrl.processRecording(samples: [1.0], sampleRate: 16000)
+        XCTAssertNotEqual(first?.recordingID, second?.recordingID)
+    }
+
+    func testProcessRecordingArchivesWithAnIDEvenWithoutAResult() async {
+        let archiver = MockArchiver()
+        let (ctrl, _, _, _) = makeController(transcriber: MockTranscriber(result: nil), archiver: archiver)
+        _ = await ctrl.processRecording(samples: [1.0], sampleRate: 16000)
+        XCTAssertNotNil(archiver.lastID)
     }
 }

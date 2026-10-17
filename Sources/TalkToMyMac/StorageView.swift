@@ -119,8 +119,9 @@ struct StorageView: View {
         } header: {
             Text("Audio Recordings")
         } footer: {
-            Text("Every dictation is saved as a WAV file. Transcription doesn't need them "
-                 + "afterwards, so purging them is safe.")
+            Text("Every dictation is saved as a compressed audio file (.m4a) once it's been "
+                 + "processed, and can be played from its transcript. Purging them keeps the "
+                 + "transcripts.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }

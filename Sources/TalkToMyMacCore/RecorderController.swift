@@ -1,3 +1,5 @@
+import Foundation
+
 /// Central controller — manages recording state and the transcription pipeline.
 ///
 /// `@unchecked Sendable`: callers (e.g. a `@MainActor` app delegate) hold this across an
@@ -21,6 +23,7 @@ public class RecorderController: @unchecked Sendable {
     private let outputSink: OutputDelivering?
     private let denoiser: AudioDenoising?
     private let systemAudio: SystemAudioMuting?
+    private let archiver: RecordingArchiving?
 
     public init(
         recorder: AudioRecording,
@@ -32,7 +35,8 @@ public class RecorderController: @unchecked Sendable {
         formatter: TextFormatting? = nil,
         outputSink: OutputDelivering? = nil,
         denoiser: AudioDenoising? = nil,
-        systemAudio: SystemAudioMuting? = nil
+        systemAudio: SystemAudioMuting? = nil,
+        archiver: RecordingArchiving? = nil
     ) {
         self.recorder = recorder
         self.permissionChecker = permissionChecker
@@ -44,6 +48,7 @@ public class RecorderController: @unchecked Sendable {
         self.outputSink = outputSink
         self.denoiser = denoiser
         self.systemAudio = systemAudio
+        self.archiver = archiver
     }
 
     /// Toggle recording state. Returns success/failure.
@@ -132,10 +137,14 @@ public class RecorderController: @unchecked Sendable {
         return .success(())
     }
 
-    /// Process recorded audio through the pipeline: denoise → transcribe → clean → review → format → deliver.
-    /// Returns the raw and final text plus step timings, or nil if any required step fails.
+    /// Process recorded audio through the pipeline: denoise → transcribe → clean → review → format → deliver
+    /// → archive. Returns the raw and final text plus step timings, or nil if any required step fails.
     @discardableResult
     public func processRecording(samples: [Float], sampleRate: Double) async -> PipelineResult? {
+        // 6. Archive (optional) — the raw, un-denoised audio, kept whatever the outcome, and only
+        //    once everything else is done so encoding can't delay the paste.
+        let recordingID = UUID()
+        defer { archiver?.archive(samples: samples, sampleRate: sampleRate, id: recordingID) }
         let clock = ContinuousClock()
 
         // 1. Denoise (optional)
@@ -195,7 +204,8 @@ public class RecorderController: @unchecked Sendable {
             transcriptionEngine: transcription.engine,
             formattingDuration: formattingDuration,
             formattingModel: outcome?.model,
-            tokenUsage: outcome?.usage
+            tokenUsage: outcome?.usage,
+            recordingID: recordingID
         )
     }
 }

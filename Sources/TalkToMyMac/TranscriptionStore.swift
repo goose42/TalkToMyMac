@@ -222,7 +222,8 @@ final class TranscriptionStore {
     func insert(_ result: PipelineResult, audioSeconds: Double) -> TranscriptionRecord? {
         guard db != nil else { return nil }
 
-        let id = UUID().uuidString
+        // Shared with the archived recording, which is saved under the same ID.
+        let id = result.recordingID.uuidString
         let timestamp = Date().timeIntervalSince1970
 
         guard sqlite3_exec(db, "BEGIN;", nil, nil, nil) == SQLITE_OK else {

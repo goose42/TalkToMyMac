@@ -1,3 +1,5 @@
+import Foundation
+
 /// The top-level app state.
 public enum AppState: Equatable {
     case idle
@@ -83,6 +85,9 @@ public struct PipelineResult: Equatable, Sendable {
     public let formattingModel: FormattingModel?
     /// Tokens the formatting model reported (remote models only), even for a failed attempt.
     public let tokenUsage: TokenUsage?
+    /// Identifies the dictation: the archived recording is saved under it, and the history
+    /// stores the transcript under it, so the two can be matched up.
+    public let recordingID: UUID
 
     public init(
         rawText: String,
@@ -93,7 +98,8 @@ public struct PipelineResult: Equatable, Sendable {
         transcriptionEngine: TranscriptionEngine = .appleOnDevice,
         formattingDuration: Duration?,
         formattingModel: FormattingModel? = nil,
-        tokenUsage: TokenUsage? = nil
+        tokenUsage: TokenUsage? = nil,
+        recordingID: UUID = UUID()
     ) {
         self.rawText = rawText
         self.cleanedText = cleanedText
@@ -104,5 +110,6 @@ public struct PipelineResult: Equatable, Sendable {
         self.formattingDuration = formattingDuration
         self.formattingModel = formattingModel
         self.tokenUsage = tokenUsage
+        self.recordingID = recordingID
     }
 }
