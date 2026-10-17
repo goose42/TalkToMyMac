@@ -6,7 +6,8 @@ import TalkToMyMacCore
 // MARK: - Model
 
 /// What the floating indicator is showing. Driven by `AppDelegate`'s `RecordingIndicator`
-/// conformance, plus live input levels pushed from `AudioCapture` while recording.
+/// conformance, plus live input levels pushed from `AudioCapture` while recording, and any
+/// `IndicatorNotice` presented through `FloatingIndicatorController`.
 @MainActor
 @Observable
 final class FloatingIndicatorModel {
@@ -64,9 +65,27 @@ final class FloatingIndicatorModel {
         if isReverted { reverted.insert(occurrence) } else { reverted.remove(occurrence) }
     }
 
+    /// A message for the user. While set and idle, the dot grows to show it with a
+    /// countdown bar; it outranks the review pill, which returns once it's dismissed.
+    private(set) var notice: IndicatorNotice?
+
+    func show(_ notice: IndicatorNotice) {
+        self.notice = notice
+    }
+
+    /// Dismisses the notice; with an `id`, only if that notice is still the one showing.
+    func dismissNotice(_ id: UUID? = nil) {
+        guard id == nil || notice?.id == id else { return }
+        notice = nil
+    }
+
+    static let noticeSize = CGSize(width: 280, height: 68)
+
     /// Size of the visible capsule right now. Also the draggable area.
     var capsuleSize: CGSize {
-        phase == .idle && review != nil ? CGSize(width: 28, height: 20) : phase.capsuleSize
+        guard phase == .idle else { return phase.capsuleSize }
+        if notice != nil { return Self.noticeSize }
+        return review != nil ? CGSize(width: 28, height: 20) : phase.capsuleSize
     }
 }
 
@@ -98,6 +117,10 @@ extension FloatingIndicatorModel.Phase {
 ///
 /// For terminals, where a paste can't be fixed afterwards, the picker instead opens before
 /// pasting, with Paste and Cancel buttons (see `askBeforePaste`).
+///
+/// It's also where the app tells the user things: `present(_:)` grows the dot into a card
+/// for the notice's duration, with a bar counting down, then shrinks it back. Clicking the
+/// card dismisses it early.
 @MainActor
 final class FloatingIndicatorController: NSObject {
     let model = FloatingIndicatorModel()
@@ -112,7 +135,8 @@ final class FloatingIndicatorController: NSObject {
     /// Set while we move the panel ourselves, so only user drags get saved as a position.
     private var isPlacingProgrammatically = false
 
-    private static let panelSize = NSSize(width: 180, height: 50)
+    /// Big enough for the largest capsule (a notice) plus its shadow; the rest is click-through.
+    private static let panelSize = NSSize(width: 320, height: 84)
     /// Gap between the capsule and the bottom of the panel (room for its shadow).
     fileprivate static let capsuleBottomPadding: CGFloat = 6
     /// Gap between the indicator and the Dock (or screen edge, if the Dock is hidden).
@@ -120,7 +144,11 @@ final class FloatingIndicatorController: NSObject {
     /// Extra grab area around the capsule — the idle dot alone is a tiny target.
     private static let hitSlop: CGFloat = 6
     private static let visibleKey = "floatingIndicatorVisible"
-    private static let originKey = "floatingIndicatorOrigin"
+    /// The bottom centre of the panel, so the position survives changes to `panelSize`.
+    private static let anchorKey = "floatingIndicatorAnchor"
+    /// The panel's bottom-left corner, saved by versions with a 180-point-wide panel.
+    private static let legacyOriginKey = "floatingIndicatorOrigin"
+    private static let legacyPanelWidth: CGFloat = 180
 
     var isVisible: Bool {
         get { UserDefaults.standard.object(forKey: Self.visibleKey) as? Bool ?? true }
@@ -132,14 +160,28 @@ final class FloatingIndicatorController: NSObject {
 
     /// Where the user dragged the panel to; `nil` means "default spot on the active screen".
     private var savedOrigin: NSPoint? {
-        get { UserDefaults.standard.string(forKey: Self.originKey).map(NSPointFromString) }
+        get {
+            UserDefaults.standard.string(forKey: Self.anchorKey).map(NSPointFromString)
+                .map { NSPoint(x: $0.x - Self.panelSize.width / 2, y: $0.y) }
+        }
         set {
             if let newValue {
-                UserDefaults.standard.set(NSStringFromPoint(newValue), forKey: Self.originKey)
+                let anchor = NSPoint(x: newValue.x + Self.panelSize.width / 2, y: newValue.y)
+                UserDefaults.standard.set(NSStringFromPoint(anchor), forKey: Self.anchorKey)
             } else {
-                UserDefaults.standard.removeObject(forKey: Self.originKey)
+                UserDefaults.standard.removeObject(forKey: Self.anchorKey)
             }
         }
+    }
+
+    /// Converts a corner saved by an older version into an anchor, keeping the dot in place.
+    private static func migrateLegacyOrigin() {
+        let defaults = UserDefaults.standard
+        guard let legacy = defaults.string(forKey: legacyOriginKey).map(NSPointFromString) else { return }
+        defaults.removeObject(forKey: legacyOriginKey)
+        guard defaults.string(forKey: anchorKey) == nil else { return }
+        let anchor = NSPoint(x: legacy.x + legacyPanelWidth / 2, y: legacy.y)
+        defaults.set(NSStringFromPoint(anchor), forKey: anchorKey)
     }
 
     override init() {
@@ -198,6 +240,7 @@ final class FloatingIndicatorController: NSObject {
         )
         installMouseMonitors()
 
+        Self.migrateLegacyOrigin()
         restorePosition()
         applyVisibility()
     }
@@ -213,6 +256,25 @@ final class FloatingIndicatorController: NSObject {
             x: visible.midX - Self.panelSize.width / 2,
             y: visible.minY + Self.bottomMargin
         ))
+    }
+
+    /// Shows `notice` in place of the dot until it expires or is clicked away, replacing any
+    /// notice already showing. Ignored while the indicator is hidden.
+    func showNotice(_ notice: IndicatorNotice) {
+        guard isVisible else { return }
+        model.show(notice)
+        updatePicker()
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(max(notice.expiresAt.timeIntervalSinceNow, 0)))
+            self?.dismissNotice(notice.id)
+        }
+    }
+
+    /// Dismisses the notice; with an `id`, only if that notice is still the one showing.
+    func dismissNotice(_ id: UUID? = nil) {
+        guard model.notice != nil else { return }
+        model.dismissNotice(id)
+        updatePicker()
     }
 
     /// Offers `review` from the indicator. Ignored while the indicator is hidden.
@@ -314,7 +376,9 @@ final class FloatingIndicatorController: NSObject {
                 // saves where it lands. A press that didn't move it is a click.
                 let origin = self.panel.frame.origin
                 self.panel.performDrag(with: event)
-                if self.panel.frame.origin == origin, self.model.review != nil, !self.model.isBeforePaste {
+                if self.panel.frame.origin == origin, self.model.notice != nil {
+                    self.dismissNotice()
+                } else if self.panel.frame.origin == origin, self.model.review != nil, !self.model.isBeforePaste {
                     self.model.isPickerOpen.toggle()
                     self.updatePicker()
                 }
@@ -401,7 +465,10 @@ private struct FloatingIndicatorView: View {
         ZStack {
             switch model.phase {
             case .idle:
-                if let review = model.review {
+                if let notice = model.notice {
+                    NoticeCard(notice: notice)
+                        .transition(.opacity)
+                } else if let review = model.review {
                     Text("\(review.occurrences.count)")
                         .font(.system(size: 11, weight: .semibold).monospacedDigit())
                         .foregroundStyle(.white)
@@ -421,8 +488,8 @@ private struct FloatingIndicatorView: View {
             }
         }
         .frame(width: model.capsuleSize.width, height: model.capsuleSize.height)
-        .background(Capsule().fill(.black.opacity(0.72)))
-        .overlay(Capsule().strokeBorder(.white.opacity(0.4), lineWidth: 1))
+        .background(shape.fill(.black.opacity(0.72)))
+        .overlay(shape.strokeBorder(.white.opacity(0.4), lineWidth: 1))
         .shadow(color: .black.opacity(0.3), radius: 3, y: 1)
         .animation(.spring(duration: 0.35, bounce: 0.25), value: model.capsuleSize)
         // Grow upward from the resting spot rather than from the panel's centre.
@@ -430,6 +497,71 @@ private struct FloatingIndicatorView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
     }
 
+    /// A capsule at every size the indicator had before notices; the taller notice card
+    /// keeps the same corners rather than becoming a lozenge.
+    private var shape: RoundedRectangle {
+        RoundedRectangle(cornerRadius: min(model.capsuleSize.height / 2, 17), style: .continuous)
+    }
+}
+
+/// An `IndicatorNotice` inside the grown capsule: icon, title and message, with a bar along
+/// the bottom shrinking as its time runs out.
+private struct NoticeCard: View {
+    let notice: IndicatorNotice
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: symbol)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(tint)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(notice.title)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                    Text(notice.message)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.white.opacity(0.75))
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+            }
+            Spacer(minLength: 0)
+            TimelineView(.animation) { context in
+                GeometryReader { geometry in
+                    Capsule()
+                        .fill(tint.opacity(0.25))
+                        .overlay(alignment: .leading) {
+                            Capsule()
+                                .fill(tint)
+                                .frame(width: geometry.size.width * notice.remainingFraction(at: context.date))
+                        }
+                }
+            }
+            .frame(height: 3)
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 9)
+        .padding(.bottom, 7)
+    }
+
+    private var symbol: String {
+        switch notice.style {
+        case .info:    return "info.circle.fill"
+        case .warning: return "exclamationmark.triangle.fill"
+        case .error:   return "xmark.octagon.fill"
+        }
+    }
+
+    private var tint: Color {
+        switch notice.style {
+        case .info:    return .blue
+        case .warning: return .yellow
+        case .error:   return .red
+        }
+    }
 }
 
 private struct WaveformBars: View {
@@ -532,5 +664,16 @@ private struct ReplacementPickerView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Notices
+
+extension FloatingIndicatorController: NoticePresenting {
+    /// Callable from the recording pipeline's threads; hops to the main actor.
+    nonisolated func present(_ notice: IndicatorNotice) {
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated { self?.showNotice(notice) }
+        }
     }
 }

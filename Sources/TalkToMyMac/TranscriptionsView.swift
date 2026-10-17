@@ -130,15 +130,25 @@ private struct TranscriptionRow: View {
 // MARK: - Detail
 
 /// One dictation, step by step: what speech-to-text heard, what deterministic cleanup changed,
-/// and what the LLM delivered.
+/// and what the LLM delivered. Up and down arrows in the top-right corner step to the newer
+/// and older dictation in place, so the back arrow still returns straight to the list.
 @available(macOS 26.0, *)
 private struct TranscriptionDetailView: View {
     let store: TranscriptionStore
-    let id: String
     /// Returns to the list.
     let onBack: () -> Void
 
+    /// The dictation showing; changes as the user steps through the history.
+    @State private var id: String
     @State private var detail: TranscriptionDetail?
+    @State private var newerID: String?
+    @State private var olderID: String?
+
+    init(store: TranscriptionStore, id: String, onBack: @escaping () -> Void) {
+        self.store = store
+        self.onBack = onBack
+        _id = State(initialValue: id)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -165,11 +175,36 @@ private struct TranscriptionDetailView: View {
 
     private func reload() {
         detail = store.detail(id: id)
+        (newerID, olderID) = store.neighbors(of: id)
+    }
+
+    private func show(_ newID: String?) {
+        guard let newID else { return }
+        id = newID
+        reload()
     }
 
     private var backBar: some View {
         BackBar(title: detail?.record.timestamp.formatted(.dateTime.month(.abbreviated).day().year().hour().minute()),
-                help: "Back to Transcriptions", action: onBack)
+                help: "Back to Transcriptions", action: onBack) {
+            HStack(spacing: 2) {
+                stepButton("chevron.up", help: "Newer transcription", to: newerID)
+                stepButton("chevron.down", help: "Older transcription", to: olderID)
+            }
+        }
+    }
+
+    /// Greyed out at either end of the list, where there's no transcription to step to.
+    private func stepButton(_ symbol: String, help: String, to target: String?) -> some View {
+        Button { show(target) } label: {
+            Image(systemName: symbol)
+                .font(.title3.weight(.semibold))
+                .frame(width: 28, height: 28)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.borderless)
+        .disabled(target == nil)
+        .help(help)
     }
 
     private func content(_ detail: TranscriptionDetail) -> some View {

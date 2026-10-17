@@ -7,9 +7,10 @@ final class FormattingProviderTests: XCTestCase {
     func testOnlyRemoteProvidersHaveAConfigurationPage() {
         XCTAssertFalse(FormattingProvider.appleOnDevice.hasConfiguration)
         XCTAssertTrue(FormattingProvider.groq.hasConfiguration)
+        XCTAssertTrue(FormattingProvider.openRouter.hasConfiguration)
     }
 
     func testConfigurableProvidersListsThemInOrder() {
-        XCTAssertEqual(FormattingProvider.configurable, [.groq])
+        XCTAssertEqual(FormattingProvider.configurable, [.groq, .openRouter])
     }
 }

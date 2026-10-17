@@ -145,8 +145,26 @@ final class GroqResponsesTests: XCTestCase {
 
     // MARK: Models
 
-    func testModelCatalogIsGptOss20bOnly() {
-        XCTAssertEqual(GroqModel.allCases.map(\.rawValue), ["openai/gpt-oss-20b"])
+    func testModelCatalog() {
+        XCTAssertEqual(GroqModel.allCases.map(\.rawValue), [
+            "openai/gpt-oss-20b",
+            "openai/gpt-oss-120b",
+            "qwen/qwen3.8-27b",
+        ])
+        XCTAssertEqual(GroqModel.default, .gptOss20b)
+    }
+
+    func testOnlyReasoningModelsSendReasoningEffort() throws {
+        XCTAssertTrue(GroqModel.gptOss20b.supportsReasoning)
+        XCTAssertTrue(GroqModel.gptOss120b.supportsReasoning)
+        XCTAssertFalse(GroqModel.qwen38_27b.supportsReasoning)
+
+        // Only gpt-oss takes reasoning effort "low", so it's left out of other models' requests.
+        let request = GroqResponses.makeRequest(apiKey: "gsk_test", model: .qwen38_27b,
+                                                instructions: "Clean this up.", input: "hi")
+        let body = try body(of: request)
+        XCTAssertEqual(body["model"] as? String, "qwen/qwen3.8-27b")
+        XCTAssertNil(body["reasoning"])
     }
 
     func testProviderDefaultsToOnDevice() {

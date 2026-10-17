@@ -298,7 +298,8 @@ final class TranscriptionStore {
     func recentTranscriptions(limit: Int = 10, offset: Int = 0) -> [TranscriptionRecord] {
         guard let db = db else { return [] }
 
-        let sql = "SELECT id, timestamp, text FROM formatted_transcriptions ORDER BY timestamp DESC LIMIT ? OFFSET ?;"
+        // `id` breaks timestamp ties, matching `neighbors(of:)`.
+        let sql = "SELECT id, timestamp, text FROM formatted_transcriptions ORDER BY timestamp DESC, id DESC LIMIT ? OFFSET ?;"
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
             print("[TranscriptionStore] Prepare select failed: \(errorMessage)")
@@ -317,6 +318,30 @@ final class TranscriptionStore {
             results.append(TranscriptionRecord(id: id, timestamp: timestamp, text: text))
         }
         return results
+    }
+
+    /// The transcriptions either side of `id` in the list's newest-first order: `newer` is the
+    /// one above it, `older` the one below. Both nil if `id` is gone.
+    func neighbors(of id: String) -> (newer: String?, older: String?) {
+        guard db != nil else { return (nil, nil) }
+        let current = "(SELECT timestamp, id FROM formatted_transcriptions WHERE id = ?)"
+        return (
+            neighbor("SELECT id FROM formatted_transcriptions WHERE (timestamp, id) > \(current) "
+                     + "ORDER BY timestamp ASC, id ASC LIMIT 1;", of: id),
+            neighbor("SELECT id FROM formatted_transcriptions WHERE (timestamp, id) < \(current) "
+                     + "ORDER BY timestamp DESC, id DESC LIMIT 1;", of: id)
+        )
+    }
+
+    private func neighbor(_ sql: String, of id: String) -> String? {
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            print("[TranscriptionStore] Prepare neighbor select failed: \(errorMessage)")
+            return nil
+        }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_text(stmt, 1, (id as NSString).utf8String, -1, Self.transient)
+        return sqlite3_step(stmt) == SQLITE_ROW ? Self.text(stmt, 0) : nil
     }
 
     /// How many delivered transcriptions there are, for paging through them.

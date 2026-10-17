@@ -23,11 +23,14 @@ struct GroqConfigurationView: View {
     /// One-line status for the provider's row on the Models page.
     static func summary(settings: FormattingSettings) -> String {
         let key = APIKeyStore.groq.load() != nil ? "API key saved" : "No API key"
-        return "\(settings.groqModel.displayName) · \(key)"
+        let paused = settings.formattingPause?.isActive(for: .groq) == true ? " · Paused" : ""
+        return "\(settings.groqModel.displayName) · \(key)\(paused)"
     }
 
     var body: some View {
         Form {
+            FormattingPauseSection(provider: .groq, settings: settings)
+
             Section {
                 LabeledContent("API key") {
                     HStack {
@@ -135,46 +138,6 @@ struct GroqConfigurationView: View {
             switch await groqFormatter.testConnection() {
             case .success(let sample): testState = .succeeded(sample)
             case .failure(let error):  testState = .failed(error.localizedDescription)
-            }
-        }
-    }
-}
-
-/// Editable per-million-token prices for one remote model, used for the cost estimates on
-/// the Instrumentation tab.
-@available(macOS 26.0, *)
-private struct PriceEditor: View {
-    let model: FormattingModel
-    @Bindable var settings: FormattingSettings
-
-    var body: some View {
-        if let price = settings.price(for: model) {
-            priceField("Input price", value: price.inputPerMillion) { $0.inputPerMillion = $1 }
-            priceField("Cached input price", value: price.cachedInputPerMillion) { $0.cachedInputPerMillion = $1 }
-            priceField("Output price", value: price.outputPerMillion) { $0.outputPerMillion = $1 }
-            if let listPrice = GroqModel(rawValue: model.modelID)?.listPrice, price != listPrice {
-                Button("Reset to List Price") { settings.resetPrice(for: model) }
-            }
-        }
-    }
-
-    private func priceField(_ label: String, value: Double,
-                            update: @escaping (inout TokenPrice, Double) -> Void) -> some View {
-        LabeledContent(label) {
-            HStack(spacing: 4) {
-                TextField(label, value: Binding(
-                    get: { value },
-                    set: { newValue in
-                        guard var price = settings.price(for: model), newValue >= 0 else { return }
-                        update(&price, newValue)
-                        settings.setPrice(price, for: model)
-                    }
-                ), format: .currency(code: "USD").precision(.fractionLength(2...4)))
-                .labelsHidden()
-                .multilineTextAlignment(.trailing)
-                .frame(width: 90)
-                Text("per 1M tokens")
-                    .foregroundStyle(.secondary)
             }
         }
     }

@@ -1,9 +1,10 @@
 import Foundation
 
 /// Which model formats transcripts.
-public enum FormattingProvider: String, CaseIterable, Hashable, Sendable {
+public enum FormattingProvider: String, CaseIterable, Hashable, Codable, Sendable {
     case appleOnDevice
     case groq
+    case openRouter
 
     /// The provider selected on first launch — on-device, so nothing leaves the Mac by default.
     public static let `default`: FormattingProvider = .appleOnDevice
@@ -12,6 +13,7 @@ public enum FormattingProvider: String, CaseIterable, Hashable, Sendable {
         switch self {
         case .appleOnDevice: return "Apple Intelligence (on-device)"
         case .groq:          return "Groq"
+        case .openRouter:    return "OpenRouter"
         }
     }
 
@@ -21,6 +23,7 @@ public enum FormattingProvider: String, CaseIterable, Hashable, Sendable {
         switch self {
         case .appleOnDevice: return false
         case .groq:          return true
+        case .openRouter:    return true
         }
     }
 
@@ -46,6 +49,10 @@ public struct FormattingModel: Hashable, Sendable {
         FormattingModel(provider: .groq, modelID: model.rawValue)
     }
 
+    public static func openRouter(_ model: OpenRouterModel) -> FormattingModel {
+        FormattingModel(provider: .openRouter, modelID: model.rawValue)
+    }
+
     /// Whether transcripts leave the Mac — and so whether calls are metered by tokens.
     public var isRemote: Bool { provider != .appleOnDevice }
 
@@ -53,6 +60,7 @@ public struct FormattingModel: Hashable, Sendable {
         switch provider {
         case .appleOnDevice: return "Apple Intelligence (on-device)"
         case .groq:          return "Groq · \(modelID)"
+        case .openRouter:    return "OpenRouter · \(modelID)"
         }
     }
 }
@@ -80,11 +88,14 @@ public struct FormattingOutcome: Equatable, Sendable {
     public let text: String?
     /// Tokens the provider reported, or nil if it didn't (on-device models, network failures).
     public let usage: TokenUsage?
+    /// Why the attempt failed, for telling the user; nil on success.
+    public let failure: String?
 
-    public init(model: FormattingModel, text: String?, usage: TokenUsage? = nil) {
+    public init(model: FormattingModel, text: String?, usage: TokenUsage? = nil, failure: String? = nil) {
         self.model = model
         self.text = text
         self.usage = usage
+        self.failure = failure
     }
 }
 
@@ -176,12 +187,21 @@ public extension TokenTotals {
 }
 
 public extension GroqModel {
-    /// Groq's published price when this version was written
-    /// (https://console.groq.com/docs/model/openai/gpt-oss-20b). Users can override it in
-    /// Settings when Groq's pricing changes.
-    var listPrice: TokenPrice {
+    /// Groq's published price when this version was written (https://groq.com/pricing), or
+    /// nil for models whose price wasn't published; users enter or override prices in Settings.
+    var listPrice: TokenPrice? {
         switch self {
-        case .gptOss20b: return TokenPrice(inputPerMillion: 0.075, cachedInputPerMillion: 0.0375, outputPerMillion: 0.30)
+        case .gptOss20b:  return TokenPrice(inputPerMillion: 0.075, cachedInputPerMillion: 0.0375, outputPerMillion: 0.30)
+        case .gptOss120b: return TokenPrice(inputPerMillion: 0.15, cachedInputPerMillion: 0.075, outputPerMillion: 0.60)
+        case .qwen38_27b: return nil
         }
+    }
+}
+
+public extension OpenRouterModel {
+    /// Every offered model is one of OpenRouter's `:free` variants. Users can still set a
+    /// price in Settings if they switch to a paid route.
+    var listPrice: TokenPrice {
+        TokenPrice(inputPerMillion: 0, cachedInputPerMillion: 0, outputPerMillion: 0)
     }
 }

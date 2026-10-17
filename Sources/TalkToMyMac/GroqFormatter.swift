@@ -27,13 +27,15 @@ final class GroqFormatter: TextFormatting, @unchecked Sendable {
             let output = try await respond(model: model, instructions: settings.resolvedInstructions,
                                            input: FormattingInstructions.userPrompt(transcript: raw))
             let trimmed = output.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            return FormattingOutcome(model: .groq(model), text: trimmed.isEmpty ? nil : trimmed, usage: output.usage)
+            return FormattingOutcome(model: .groq(model), text: trimmed.isEmpty ? nil : trimmed, usage: output.usage,
+                                     failure: trimmed.isEmpty ? "Response had no text" : nil)
         } catch let failure as Failure {
             print("[GroqFormatter] \(model.rawValue) failed: \(failure.error.localizedDescription)")
-            return FormattingOutcome(model: .groq(model), text: nil, usage: failure.usage)
+            return FormattingOutcome(model: .groq(model), text: nil, usage: failure.usage,
+                                     failure: failure.error.localizedDescription)
         } catch {
             print("[GroqFormatter] \(model.rawValue) failed: \(error.localizedDescription)")
-            return FormattingOutcome(model: .groq(model), text: nil)
+            return FormattingOutcome(model: .groq(model), text: nil, failure: error.localizedDescription)
         }
     }
 

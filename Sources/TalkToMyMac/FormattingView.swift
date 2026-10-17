@@ -82,11 +82,30 @@ struct FormattingView: View {
 
     @ViewBuilder
     private var formattingStatusView: some View {
+        if let pause = settings.activePause {
+            Label("\(pause.provider.displayName) is paused until "
+                  + "\(pause.until.formatted(date: .omitted, time: .shortened)) after a failed call "
+                  + "— resume in the Models tab",
+                  systemImage: "pause.circle.fill")
+                .foregroundStyle(.orange)
+                .font(.caption)
+        } else {
+            providerStatusView
+        }
+    }
+
+    @ViewBuilder
+    private var providerStatusView: some View {
         switch settings.provider {
         case .appleOnDevice:
             onDeviceStatusView
         case .groq:
             Label("Using Groq · \(settings.groqModel.rawValue) — change in the Models tab",
+                  systemImage: "cloud.fill")
+                .foregroundStyle(.secondary)
+                .font(.caption)
+        case .openRouter:
+            Label("Using OpenRouter · \(settings.openRouterModel.rawValue) — change in the Models tab",
                   systemImage: "cloud.fill")
                 .foregroundStyle(.secondary)
                 .font(.caption)
