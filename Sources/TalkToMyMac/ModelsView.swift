@@ -87,8 +87,7 @@ struct ModelsView: View {
             }
             .disabled(settings.provider != .groq)
         }
-        .padding(20)
-        .frame(minWidth: 440)
+        .formStyle(.grouped)
     }
 
     // MARK: Speech-to-text

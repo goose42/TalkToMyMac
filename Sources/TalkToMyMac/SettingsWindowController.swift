@@ -4,9 +4,13 @@ import SwiftUI
 import TalkToMyMacCore
 
 /// Manages the settings window. Call `showWindow()` to open or bring to front.
+///
+/// While the window is open the app switches to the `.regular` activation policy, so it gets a
+/// Dock icon and a Cmd-Tab entry. As a menu-bar-only (`.accessory`) app, clicking another app
+/// buries the window with no way back to it. Closing the window restores `.accessory`.
 @available(macOS 26.0, *)
 @MainActor
-final class SettingsWindowController {
+final class SettingsWindowController: NSObject, NSWindowDelegate {
     private var window: NSWindow?
     private let speechService: SpeechTranscriptionService
     private let parakeetService: ParakeetTranscriptionService
@@ -42,80 +46,101 @@ final class SettingsWindowController {
     }
 
     func showWindow() {
+        NSApp.setActivationPolicy(.regular)
+
         if let window {
             window.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             return
         }
 
-        // Toolbar-style tabs, as in every macOS settings window: the tab buttons live in the
-        // window's toolbar (one surface with the title bar) and the window title follows the
-        // selected tab. A SwiftUI `TabView` in a plain window instead draws a bordered tab
-        // control, which adds a separate band between the title bar and the content.
-        let tabs = NSTabViewController()
-        tabs.tabStyle = .toolbar
-        tabs.addTabViewItem(Self.tab(
-            "General",
-            symbol: "gearshape",
-            SettingsView(speechService: speechService, settings: settings,
-                         shortcuts: shortcuts, floatingIndicator: floatingIndicator)
-        ))
-        tabs.addTabViewItem(Self.tab(
-            "Dictionary",
-            symbol: "character.book.closed",
-            DictionaryView(editor: dictionaryEditor, settings: settings, transcriber: transcriptionRouter)
-        ))
-        tabs.addTabViewItem(Self.tab(
-            "Formatting",
-            symbol: "wand.and.stars",
-            FormattingView(formatter: formatter, settings: settings)
-        ))
-        tabs.addTabViewItem(Self.tab(
-            "Models",
-            symbol: "cpu",
-            ModelsView(groqFormatter: groqFormatter, parakeetService: parakeetService, settings: settings)
-        ))
-        tabs.addTabViewItem(Self.tab(
-            "Transcriptions",
-            symbol: "text.bubble",
-            TranscriptionsView(store: transcriptionStore)
-        ))
-        tabs.addTabViewItem(Self.tab(
-            "Instrumentation",
-            symbol: "gauge.with.dots.needle.bottom.50percent",
-            InstrumentationView(store: transcriptionStore, settings: settings)
-        ))
-        tabs.addTabViewItem(Self.tab(
-            "Storage",
-            symbol: "internaldrive",
-            StorageView(store: transcriptionStore)
-        ))
+        let root = SettingsRootView(
+            speechService: speechService, parakeetService: parakeetService,
+            transcriptionRouter: transcriptionRouter, formatter: formatter,
+            groqFormatter: groqFormatter, settings: settings, shortcuts: shortcuts,
+            transcriptionStore: transcriptionStore, floatingIndicator: floatingIndicator,
+            dictionaryEditor: dictionaryEditor
+        )
+        let controller = NSHostingController(rootView: root)
+        controller.sizingOptions = []
 
-        let win = NSWindow(contentViewController: tabs)
-        win.styleMask = [.titled, .closable]
-        win.toolbarStyle = .preference
+        let win = NSWindow(contentViewController: controller)
+        win.title = "Settings"
+        // Full-size content plus an (empty) unified toolbar lets the sidebar run up under the
+        // title bar, as in System Settings.
+        win.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
+        win.toolbar = NSToolbar()
+        win.toolbarStyle = .unified
         win.setContentSize(Self.contentSize)
+        win.contentMinSize = Self.contentMinSize
         win.center()
         win.isReleasedWhenClosed = false
+        win.delegate = self
         win.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
 
         self.window = win
     }
 
-    /// All tabs share one size, so switching tabs doesn't resize the window. Wide enough
-    /// for all seven toolbar tabs to show without an overflow menu.
-    private static let contentSize = NSSize(width: 780, height: 800)
+    func windowWillClose(_ notification: Notification) {
+        NSApp.setActivationPolicy(.accessory)
+    }
 
-    private static func tab(_ label: String, symbol: String, _ view: some View) -> NSTabViewItem {
-        let controller = NSHostingController(rootView: view)
-        controller.sizingOptions = []
-        controller.preferredContentSize = contentSize
-        controller.title = label
-        let item = NSTabViewItem(viewController: controller)
-        item.label = label
-        item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)
-        return item
+    private static let contentSize = NSSize(width: 980, height: 760)
+    private static let contentMinSize = NSSize(width: 720, height: 480)
+}
+
+// MARK: - Sidebar
+
+@available(macOS 26.0, *)
+private struct SettingsRootView: View {
+    let speechService: SpeechTranscriptionService
+    let parakeetService: ParakeetTranscriptionService
+    let transcriptionRouter: TranscriptionRouter
+    let formatter: FoundationModelFormatter
+    let groqFormatter: GroqFormatter
+    let settings: FormattingSettings
+    let shortcuts: ShortcutManager
+    let transcriptionStore: TranscriptionStore
+    let floatingIndicator: FloatingIndicatorController
+    let dictionaryEditor: DictionaryEditor
+
+    @State private var selection: SettingsPane? = .general
+
+    var body: some View {
+        NavigationSplitView {
+            // `id: \.self` tags each row with the pane itself, matching `selection`'s type.
+            // Tagged by `SettingsPane.ID` (a String) instead, clicks never change the selection.
+            List(SettingsPane.allCases, id: \.self, selection: $selection) { pane in
+                Label(pane.title, systemImage: pane.symbol)
+            }
+            .navigationSplitViewColumnWidth(min: 180, ideal: 200)
+        } detail: {
+            let pane = selection ?? .general
+            detail(for: pane)
+                .navigationTitle(pane.title)
+        }
+    }
+
+    @ViewBuilder
+    private func detail(for pane: SettingsPane) -> some View {
+        switch pane {
+        case .general:
+            SettingsView(speechService: speechService, settings: settings,
+                         shortcuts: shortcuts, floatingIndicator: floatingIndicator)
+        case .dictionary:
+            DictionaryView(editor: dictionaryEditor, settings: settings, transcriber: transcriptionRouter)
+        case .formatting:
+            FormattingView(formatter: formatter, settings: settings)
+        case .models:
+            ModelsView(groqFormatter: groqFormatter, parakeetService: parakeetService, settings: settings)
+        case .transcriptions:
+            TranscriptionsView(store: transcriptionStore)
+        case .instrumentation:
+            InstrumentationView(store: transcriptionStore, settings: settings)
+        case .storage:
+            StorageView(store: transcriptionStore)
+        }
     }
 }
 
@@ -224,8 +249,7 @@ private struct SettingsView: View {
                 Toggle("Paste at cursor after dictation", isOn: $settings.autoPasteEnabled)
             }
         }
-        .padding(20)
-        .frame(minWidth: 440)
+        .formStyle(.grouped)
         .task {
             await speechService.prepare()
         }

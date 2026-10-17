@@ -71,8 +71,7 @@ struct FormattingView: View {
             }
             .disabled(!settings.isEnabled)
         }
-        .padding(20)
-        .frame(minWidth: 440)
+        .formStyle(.grouped)
     }
 
     // MARK: Formatting status
