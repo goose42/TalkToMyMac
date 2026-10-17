@@ -131,6 +131,7 @@ struct StorageView: View {
     private func title(of table: TranscriptionStore.Table) -> String {
         switch table {
         case .raw:       return "Raw transcriptions"
+        case .cleaned:   return "Cleaned transcriptions"
         case .formatted: return "Formatted transcriptions"
         case .metrics:   return "Metrics"
         }

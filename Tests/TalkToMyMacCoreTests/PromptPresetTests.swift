@@ -58,4 +58,21 @@ final class PromptPresetTests: XCTestCase {
             XCTAssertTrue(text.contains("Output only"), "\(preset) should restrict the output")
         }
     }
+
+    // MARK: isEdited(_:)
+
+    func testBuiltInTextIsNotEdited() {
+        XCTAssertFalse(PromptPreset.email.isEdited(PromptPreset.email.instructions!))
+    }
+
+    func testChangedTextIsEdited() {
+        XCTAssertTrue(PromptPreset.email.isEdited(PromptPreset.email.instructions! + " Sign off as Sam."))
+        XCTAssertTrue(PromptPreset.email.isEdited(""))
+    }
+
+    // Custom has no built-in text, so anything typed counts as an edit.
+    func testCustomIsEditedOnceItHasText() {
+        XCTAssertFalse(PromptPreset.custom.isEdited(""))
+        XCTAssertTrue(PromptPreset.custom.isEdited("Write in French."))
+    }
 }

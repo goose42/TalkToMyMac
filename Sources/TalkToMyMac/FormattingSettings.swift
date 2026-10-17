@@ -26,6 +26,7 @@ final class FormattingSettings: @unchecked Sendable {
         static let groqModel = "groqModel"
         static let tokenPrices = "tokenPrices"
         static let transcriptionEngine = "transcriptionEngine"
+        static let parakeetLanguage = "parakeetLanguage"
         /// Plain word list from the first, unreleased version of the dictionary; migrated
         /// into `dictionaryJSON` on launch.
         static let legacyDictionaryWords = "dictionaryWords"
@@ -98,6 +99,11 @@ final class FormattingSettings: @unchecked Sendable {
         didSet { UserDefaults.standard.set(transcriptionEngine.rawValue, forKey: Keys.transcriptionEngine) }
     }
 
+    /// The language Parakeet should expect, or nil to let it detect the language (the default).
+    var parakeetLanguage: ParakeetLanguage? {
+        didSet { UserDefaults.standard.set(parakeetLanguage?.rawValue, forKey: Keys.parakeetLanguage) }
+    }
+
     /// The model used when `provider` is `.groq`.
     var groqModel: GroqModel {
         didSet { UserDefaults.standard.set(groqModel.rawValue, forKey: Keys.groqModel) }
@@ -152,6 +158,7 @@ final class FormattingSettings: @unchecked Sendable {
         groqModel = defaults.string(forKey: Keys.groqModel).flatMap(GroqModel.init) ?? .default
         transcriptionEngine = defaults.string(forKey: Keys.transcriptionEngine)
             .flatMap(TranscriptionEngine.init(rawValue:)) ?? .default
+        parakeetLanguage = ParakeetLanguage(persisted: defaults.string(forKey: Keys.parakeetLanguage))
         tokenPrices = defaults.data(forKey: Keys.tokenPrices)
             .flatMap { try? JSONDecoder().decode([String: TokenPrice].self, from: $0) } ?? [:]
         if let saved = defaults.string(forKey: Keys.dictionaryJSON) {

@@ -103,6 +103,11 @@ final class ParakeetTranscriptionService: SpeechTranscribing, @unchecked Sendabl
     }
 
     func transcribe(samples: [Float], sampleRate: Double) async -> TranscriptionOutcome? {
+        await transcribe(samples: samples, sampleRate: sampleRate, language: nil)
+    }
+
+    /// Transcribes with an optional language hint; nil lets the model detect the language.
+    func transcribe(samples: [Float], sampleRate: Double, language: ParakeetLanguage?) async -> TranscriptionOutcome? {
         guard let manager else {
             print("[ParakeetTranscriptionService] Not loaded")
             return nil
@@ -111,7 +116,8 @@ final class ParakeetTranscriptionService: SpeechTranscribing, @unchecked Sendabl
             let buffer = try AudioFormatConverter.convert(samples: samples, sampleRate: sampleRate, to: Self.targetFormat)
             let resampled = Array(UnsafeBufferPointer(start: buffer.floatChannelData![0], count: Int(buffer.frameLength)))
             var decoderState = TdtDecoderState.make()
-            let result = try await manager.transcribe(resampled, decoderState: &decoderState)
+            let hint = language.flatMap { Language(rawValue: $0.rawValue) }
+            let result = try await manager.transcribe(resampled, decoderState: &decoderState, language: hint)
             let text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
             return text.isEmpty ? nil : TranscriptionOutcome(text: text, engine: .parakeetTDTv3)
         } catch {

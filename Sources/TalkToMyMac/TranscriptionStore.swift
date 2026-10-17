@@ -9,6 +9,29 @@ struct TranscriptionRecord {
     let text: String
 }
 
+/// Everything recorded about one dictation, for the transcript detail screen. Each part comes
+/// from its own table, so any of them can be missing after a purge.
+struct TranscriptionDetail {
+    let record: TranscriptionRecord
+    /// What the speech-to-text model produced; nil if raw transcriptions were purged.
+    let rawText: String?
+    let cleanup: DictationStages.CleanupRecord
+    /// nil if metrics were purged.
+    let metrics: DictationMetrics?
+
+    var stages: DictationStages {
+        let formatting = metrics.map {
+            DictationStages.FormattingRecord(attempted: $0.formattingModel != nil, applied: $0.llmApplied)
+        }
+        return DictationStages(raw: rawText, cleanup: cleanup, final: record.text, formatting: formatting)
+    }
+
+    var cleanedText: String? {
+        if case .recorded(let text) = cleanup { return text }
+        return nil
+    }
+}
+
 /// One row of `transcription_metrics`.
 struct DictationMetrics {
     let timestamp: Date
@@ -29,9 +52,11 @@ struct DictationMetrics {
 
 /// Persists transcription history and pipeline metrics in a SQLite database.
 ///
-/// Each dictation writes one row to each of three independent tables, all sharing the same
+/// Each dictation writes one row to each of four independent tables, all sharing the same
 /// `id` and `timestamp`:
 /// - `raw_transcriptions` — exactly what the speech-to-text model produced.
+/// - `cleaned_transcriptions` — what deterministic cleanup (and any review edit) turned it
+///   into; `text` is NULL when cleanup didn't run.
 /// - `formatted_transcriptions` — what was delivered after cleanup and the LLM step (the
 ///   cleaned, else raw, text if the LLM was off or failed).
 /// - `transcription_metrics` — timings, word counts, the speech and formatting models, and
@@ -43,6 +68,7 @@ final class TranscriptionStore {
     /// The tables the store manages. Raw values are the SQL table names.
     enum Table: String, CaseIterable {
         case raw = "raw_transcriptions"
+        case cleaned = "cleaned_transcriptions"
         case formatted = "formatted_transcriptions"
         case metrics = "transcription_metrics"
     }
@@ -78,6 +104,11 @@ final class TranscriptionStore {
                 id TEXT PRIMARY KEY,
                 timestamp REAL NOT NULL,
                 text TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS cleaned_transcriptions (
+                id TEXT PRIMARY KEY,
+                timestamp REAL NOT NULL,
+                text TEXT                         -- NULL when cleanup didn't run
             );
             CREATE TABLE IF NOT EXISTS formatted_transcriptions (
                 id TEXT PRIMARY KEY,
@@ -185,7 +216,7 @@ final class TranscriptionStore {
 
     // MARK: - Write
 
-    /// Records one dictation across all three tables, atomically. Returns the formatted
+    /// Records one dictation across all four tables, atomically. Returns the formatted
     /// record (what the menu shows) on success.
     @discardableResult
     func insert(_ result: PipelineResult, audioSeconds: Double) -> TranscriptionRecord? {
@@ -203,6 +234,10 @@ final class TranscriptionStore {
             execute(
                 "INSERT INTO raw_transcriptions (id, timestamp, text) VALUES (?, ?, ?);",
                 [.text(id), .real(timestamp), .text(result.rawText)]
+            )
+            && execute(
+                "INSERT INTO cleaned_transcriptions (id, timestamp, text) VALUES (?, ?, ?);",
+                [.text(id), .real(timestamp), result.cleanedText.map { .text($0) } ?? .null]
             )
             && execute(
                 "INSERT INTO formatted_transcriptions (id, timestamp, text) VALUES (?, ?, ?);",
@@ -258,11 +293,12 @@ final class TranscriptionStore {
 
     // MARK: - Read
 
-    /// Returns the most recent `limit` delivered (formatted) transcriptions, newest first.
-    func recentTranscriptions(limit: Int = 10) -> [TranscriptionRecord] {
+    /// Returns `limit` delivered (formatted) transcriptions, newest first, skipping the newest
+    /// `offset` — so `offset` pages through the history.
+    func recentTranscriptions(limit: Int = 10, offset: Int = 0) -> [TranscriptionRecord] {
         guard let db = db else { return [] }
 
-        let sql = "SELECT id, timestamp, text FROM formatted_transcriptions ORDER BY timestamp DESC LIMIT ?;"
+        let sql = "SELECT id, timestamp, text FROM formatted_transcriptions ORDER BY timestamp DESC LIMIT ? OFFSET ?;"
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
             print("[TranscriptionStore] Prepare select failed: \(errorMessage)")
@@ -271,6 +307,7 @@ final class TranscriptionStore {
         defer { sqlite3_finalize(stmt) }
 
         sqlite3_bind_int(stmt, 1, Int32(limit))
+        sqlite3_bind_int(stmt, 2, Int32(offset))
 
         var results: [TranscriptionRecord] = []
         while sqlite3_step(stmt) == SQLITE_ROW {
@@ -282,18 +319,47 @@ final class TranscriptionStore {
         return results
     }
 
+    /// How many delivered transcriptions there are, for paging through them.
+    func transcriptionCount() -> Int {
+        guard db != nil else { return 0 }
+        return Int(scalar("SELECT COUNT(*) FROM \(Table.formatted.rawValue);") ?? 0)
+    }
+
+    /// Everything recorded about the dictation with `id`; nil if its delivered text is gone.
+    func detail(id: String) -> TranscriptionDetail? {
+        guard let db = db else { return nil }
+
+        let sql = """
+            SELECT f.timestamp, f.text, r.text, c.id IS NOT NULL, c.text
+            FROM formatted_transcriptions f
+            LEFT JOIN raw_transcriptions r ON r.id = f.id
+            LEFT JOIN cleaned_transcriptions c ON c.id = f.id
+            WHERE f.id = ?;
+            """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            print("[TranscriptionStore] Prepare detail select failed: \(errorMessage)")
+            return nil
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        sqlite3_bind_text(stmt, 1, (id as NSString).utf8String, -1, Self.transient)
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
+
+        let timestamp = Date(timeIntervalSince1970: sqlite3_column_double(stmt, 0))
+        return TranscriptionDetail(
+            record: TranscriptionRecord(id: id, timestamp: timestamp, text: Self.text(stmt, 1) ?? ""),
+            rawText: Self.text(stmt, 2),
+            cleanup: sqlite3_column_int(stmt, 3) != 0 ? .recorded(Self.text(stmt, 4)) : .notRecorded,
+            metrics: metrics(id: id)
+        )
+    }
+
     /// Metrics rows recorded at or after `since` (all of them if nil), oldest first.
     func metrics(since: Date? = nil) -> [DictationMetrics] {
         guard let db = db else { return [] }
 
-        let sql = """
-            SELECT timestamp, audio_seconds, transcription_ms, formatting_ms, llm_applied,
-                   raw_word_count, formatted_word_count, words_changed,
-                   formatting_provider, formatting_model,
-                   input_tokens, output_tokens, reasoning_tokens, cached_tokens,
-                   transcription_model
-            FROM transcription_metrics WHERE timestamp >= ? ORDER BY timestamp;
-            """
+        let sql = "SELECT \(Self.metricsColumns) FROM transcription_metrics WHERE timestamp >= ? ORDER BY timestamp;"
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
             print("[TranscriptionStore] Prepare metrics select failed: \(errorMessage)")
@@ -305,21 +371,47 @@ final class TranscriptionStore {
 
         var results: [DictationMetrics] = []
         while sqlite3_step(stmt) == SQLITE_ROW {
-            results.append(DictationMetrics(
-                timestamp: Date(timeIntervalSince1970: sqlite3_column_double(stmt, 0)),
-                audioSeconds: sqlite3_column_double(stmt, 1),
-                transcriptionMs: sqlite3_column_double(stmt, 2),
-                transcriptionEngine: Self.text(stmt, 14).flatMap(TranscriptionEngine.init(modelID:)),
-                formattingMs: sqlite3_column_type(stmt, 3) == SQLITE_NULL ? nil : sqlite3_column_double(stmt, 3),
-                llmApplied: sqlite3_column_int(stmt, 4) != 0,
-                rawWordCount: Int(sqlite3_column_int64(stmt, 5)),
-                formattedWordCount: Int(sqlite3_column_int64(stmt, 6)),
-                wordsChanged: Int(sqlite3_column_int64(stmt, 7)),
-                formattingModel: Self.formattingModel(stmt, provider: 8, model: 9),
-                tokenUsage: Self.tokenUsage(stmt, firstColumn: 10)
-            ))
+            results.append(Self.metricsRow(stmt))
         }
         return results
+    }
+
+    /// The metrics row of the dictation with `id`, if there is one.
+    private func metrics(id: String) -> DictationMetrics? {
+        let sql = "SELECT \(Self.metricsColumns) FROM transcription_metrics WHERE id = ?;"
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            print("[TranscriptionStore] Prepare metrics select failed: \(errorMessage)")
+            return nil
+        }
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_text(stmt, 1, (id as NSString).utf8String, -1, Self.transient)
+        return sqlite3_step(stmt) == SQLITE_ROW ? Self.metricsRow(stmt) : nil
+    }
+
+    private static let metricsColumns = """
+        timestamp, audio_seconds, transcription_ms, formatting_ms, llm_applied,
+        raw_word_count, formatted_word_count, words_changed,
+        formatting_provider, formatting_model,
+        input_tokens, output_tokens, reasoning_tokens, cached_tokens,
+        transcription_model
+        """
+
+    /// Decodes a row selected with `metricsColumns`.
+    private static func metricsRow(_ stmt: OpaquePointer?) -> DictationMetrics {
+        DictationMetrics(
+            timestamp: Date(timeIntervalSince1970: sqlite3_column_double(stmt, 0)),
+            audioSeconds: sqlite3_column_double(stmt, 1),
+            transcriptionMs: sqlite3_column_double(stmt, 2),
+            transcriptionEngine: Self.text(stmt, 14).flatMap(TranscriptionEngine.init(modelID:)),
+            formattingMs: sqlite3_column_type(stmt, 3) == SQLITE_NULL ? nil : sqlite3_column_double(stmt, 3),
+            llmApplied: sqlite3_column_int(stmt, 4) != 0,
+            rawWordCount: Int(sqlite3_column_int64(stmt, 5)),
+            formattedWordCount: Int(sqlite3_column_int64(stmt, 6)),
+            wordsChanged: Int(sqlite3_column_int64(stmt, 7)),
+            formattingModel: Self.formattingModel(stmt, provider: 8, model: 9),
+            tokenUsage: Self.tokenUsage(stmt, firstColumn: 10)
+        )
     }
 
     /// The model in a row's provider/model columns; nil if formatting wasn't attempted or

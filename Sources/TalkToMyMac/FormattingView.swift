@@ -3,14 +3,25 @@ import SwiftUI
 import TalkToMyMacCore
 
 /// Settings tab for the formatting steps: deterministic cleanup on/off, then the LLM step's
-/// on/off, prompt preset and instructions, and the word count a transcript must exceed to
-/// be worth formatting.
+/// on/off and prompt preset (its instructions are edited on their own page), and the word
+/// count a transcript must exceed to be worth formatting.
 @available(macOS 26.0, *)
 struct FormattingView: View {
     let formatter: FoundationModelFormatter
     @Bindable var settings: FormattingSettings
 
+    @State private var path: [PresetEditorRoute] = []
+
     var body: some View {
+        NavigationStack(path: $path) {
+            form
+                .navigationDestination(for: PresetEditorRoute.self) { route in
+                    PresetEditorView(preset: route.preset, settings: settings) { path.removeLast() }
+                }
+        }
+    }
+
+    private var form: some View {
         Form {
             Section {
                 Toggle("Enable deterministic cleanup", isOn: $settings.deterministicCleanupEnabled)
@@ -36,17 +47,10 @@ struct FormattingView: View {
                 }
                 .disabled(!settings.isEnabled)
 
-                TextEditor(text: $settings.customInstructions)
-                    .font(.system(.body, design: .monospaced))
-                    .frame(minHeight: 120)
-                    .disabled(!settings.isEnabled)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 6)
-                            .stroke(Color.secondary.opacity(0.3))
-                    )
-
-                Button("Reset to Preset") {
-                    settings.resetCustomInstructionsToCurrentPreset()
+                NavigationLink(value: PresetEditorRoute(preset: settings.preset)) {
+                    LabeledContent("Edit Preset") {
+                        Text(settings.preset.isEdited(settings.customInstructions) ? "Edited" : "Built-in text")
+                    }
                 }
                 .disabled(!settings.isEnabled)
 
