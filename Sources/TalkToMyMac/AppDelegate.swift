@@ -29,6 +29,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     private let formattingSettings = FormattingSettings()
     private var formatter: FoundationModelFormatter!
     private var groqFormatter: GroqFormatter!
+    private var openRouterFormatter: OpenRouterFormatter!
     private var pasteDelivery: PasteDelivery!
     private let shortcuts = ShortcutManager()
     private var settingsController: SettingsWindowController!
@@ -50,6 +51,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
         formatter = FoundationModelFormatter(settings: formattingSettings)
         groqFormatter = GroqFormatter(settings: formattingSettings)
+        openRouterFormatter = OpenRouterFormatter(settings: formattingSettings)
         pasteDelivery = PasteDelivery(settings: formattingSettings)
 
         // Always-on-top dot that becomes a live waveform while recording.
@@ -72,6 +74,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             transcriptionRouter: transcriptionRouter,
             formatter: formatter,
             groqFormatter: groqFormatter,
+            openRouterFormatter: openRouterFormatter,
             settings: formattingSettings,
             shortcuts: shortcuts,
             transcriptionStore: transcriptionStore,
@@ -82,7 +85,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
         // Build the RecorderController: mic → Apple Speech or Parakeet (both on-device) →
         // optional deterministic cleanup → (terminals: pick replacements) → Foundation Models
-        // or Groq → paste.
+        // or a remote provider → paste.
         controller = RecorderController(
             recorder: audioCapture,
             permissionChecker: self,
@@ -90,7 +93,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             transcriber: transcriptionRouter,
             cleaner: CleanupRouter(settings: formattingSettings),
             reviewer: TerminalReviewer(settings: formattingSettings, indicator: floatingIndicator),
-            formatter: FormattingRouter(settings: formattingSettings, onDevice: formatter, groq: groqFormatter),
+            formatter: FormattingRouter(settings: formattingSettings, onDevice: formatter, groq: groqFormatter,
+                                        openRouter: openRouterFormatter, notices: floatingIndicator),
             outputSink: pasteDelivery,
             systemAudio: systemAudioMuter
         )
@@ -398,6 +402,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             if let indicator = self?.floatingIndicator {
                 if recording {
                     indicator.clearReview()
+                    indicator.dismissNotice()
                     indicator.moveToActiveScreen()
                     indicator.model.resetLevels()
                 }

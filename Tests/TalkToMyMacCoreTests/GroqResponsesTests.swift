@@ -145,8 +145,28 @@ final class GroqResponsesTests: XCTestCase {
 
     // MARK: Models
 
-    func testModelCatalogIsGptOss20bOnly() {
-        XCTAssertEqual(GroqModel.allCases.map(\.rawValue), ["openai/gpt-oss-20b"])
+    func testModelCatalog() {
+        XCTAssertEqual(GroqModel.allCases.map(\.rawValue), [
+            "openai/gpt-oss-20b",
+            "openai/gpt-oss-120b",
+            "llama-3.1-8b-instant",
+            "llama-3.3-70b-versatile",
+        ])
+        XCTAssertEqual(GroqModel.default, .gptOss20b)
+    }
+
+    func testOnlyReasoningModelsSendReasoningEffort() throws {
+        XCTAssertTrue(GroqModel.gptOss20b.supportsReasoning)
+        XCTAssertTrue(GroqModel.gptOss120b.supportsReasoning)
+        XCTAssertFalse(GroqModel.llama31_8bInstant.supportsReasoning)
+        XCTAssertFalse(GroqModel.llama33_70bVersatile.supportsReasoning)
+
+        // Llama models reject the reasoning parameter, so it is left out of their requests.
+        let request = GroqResponses.makeRequest(apiKey: "gsk_test", model: .llama33_70bVersatile,
+                                                instructions: "Clean this up.", input: "hi")
+        let body = try body(of: request)
+        XCTAssertEqual(body["model"] as? String, "llama-3.3-70b-versatile")
+        XCTAssertNil(body["reasoning"])
     }
 
     func testProviderDefaultsToOnDevice() {

@@ -8,6 +8,7 @@ struct APIKeyStore: Sendable {
     let account: String
 
     static let groq = APIKeyStore(account: "groq")
+    static let openRouter = APIKeyStore(account: "openrouter")
 
     private var baseQuery: [String: Any] {
         [kSecClass as String: kSecClassGenericPassword,

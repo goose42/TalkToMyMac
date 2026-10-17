@@ -14,6 +14,7 @@ struct ProviderConfigurationRoute: Hashable {
 struct ProviderConfigurationView: View {
     let provider: FormattingProvider
     let groqFormatter: GroqFormatter
+    let openRouterFormatter: OpenRouterFormatter
     @Bindable var settings: FormattingSettings
     /// Returns to the Models page.
     let onBack: () -> Void
@@ -36,6 +37,8 @@ struct ProviderConfigurationView: View {
         switch provider {
         case .groq:
             GroqConfigurationView(groqFormatter: groqFormatter, settings: settings)
+        case .openRouter:
+            OpenRouterConfigurationView(openRouterFormatter: openRouterFormatter, settings: settings)
         case .appleOnDevice:
             ContentUnavailableView("Nothing to Configure", systemImage: "checkmark.circle",
                                    description: Text("Apple Intelligence runs on this Mac and needs no setup."))
@@ -46,6 +49,7 @@ struct ProviderConfigurationView: View {
     static func summary(for provider: FormattingProvider, settings: FormattingSettings) -> String {
         switch provider {
         case .groq:          return GroqConfigurationView.summary(settings: settings)
+        case .openRouter:    return OpenRouterConfigurationView.summary(settings: settings)
         case .appleOnDevice: return ""
         }
     }

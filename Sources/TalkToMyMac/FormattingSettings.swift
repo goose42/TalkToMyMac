@@ -24,7 +24,9 @@ final class FormattingSettings: @unchecked Sendable {
         static let dictionaryFolderPath = "dictionaryFolderPath"
         static let formattingProvider = "formattingProvider"
         static let groqModel = "groqModel"
+        static let openRouterModel = "openRouterModel"
         static let tokenPrices = "tokenPrices"
+        static let formattingPause = "formattingPause"
         static let transcriptionEngine = "transcriptionEngine"
         static let parakeetLanguage = "parakeetLanguage"
         /// Plain word list from the first, unreleased version of the dictionary; migrated
@@ -109,6 +111,35 @@ final class FormattingSettings: @unchecked Sendable {
         didSet { UserDefaults.standard.set(groqModel.rawValue, forKey: Keys.groqModel) }
     }
 
+    /// The model used when `provider` is `.openRouter`.
+    var openRouterModel: OpenRouterModel {
+        didSet { UserDefaults.standard.set(openRouterModel.rawValue, forKey: Keys.openRouterModel) }
+    }
+
+    /// Set after a remote formatting call fails, switching that provider off for an hour.
+    /// Stays set after it expires until the next pause or `resumeFormatting()`; check
+    /// `activePause` for whether it still applies.
+    private(set) var formattingPause: FormattingPause? {
+        didSet {
+            UserDefaults.standard.set(formattingPause.flatMap { try? JSONEncoder().encode($0) },
+                                      forKey: Keys.formattingPause)
+        }
+    }
+
+    /// The pause on the selected provider, if it hasn't expired.
+    var activePause: FormattingPause? {
+        formattingPause.flatMap { $0.isActive(for: provider) ? $0 : nil }
+    }
+
+    func pauseFormatting(_ pause: FormattingPause) {
+        formattingPause = pause
+    }
+
+    /// Ends a pause early, so the next dictation is formatted again.
+    func resumeFormatting() {
+        formattingPause = nil
+    }
+
     /// Prices the user set for remote models, keyed by model ID. Models without an entry use
     /// their provider's list price; see `price(for:)`.
     private(set) var tokenPrices: [String: TokenPrice] {
@@ -156,9 +187,12 @@ final class FormattingSettings: @unchecked Sendable {
         formattingWordThreshold = defaults.object(forKey: Keys.formattingWordThreshold) as? Int ?? 3
         provider = defaults.string(forKey: Keys.formattingProvider).flatMap(FormattingProvider.init) ?? .default
         groqModel = defaults.string(forKey: Keys.groqModel).flatMap(GroqModel.init) ?? .default
+        openRouterModel = defaults.string(forKey: Keys.openRouterModel).flatMap(OpenRouterModel.init) ?? .default
         transcriptionEngine = defaults.string(forKey: Keys.transcriptionEngine)
             .flatMap(TranscriptionEngine.init(rawValue:)) ?? .default
         parakeetLanguage = ParakeetLanguage(persisted: defaults.string(forKey: Keys.parakeetLanguage))
+        formattingPause = defaults.data(forKey: Keys.formattingPause)
+            .flatMap { try? JSONDecoder().decode(FormattingPause.self, from: $0) }
         tokenPrices = defaults.data(forKey: Keys.tokenPrices)
             .flatMap { try? JSONDecoder().decode([String: TokenPrice].self, from: $0) } ?? [:]
         if let saved = defaults.string(forKey: Keys.dictionaryJSON) {
@@ -195,10 +229,16 @@ final class FormattingSettings: @unchecked Sendable {
     /// What `model` costs per token: the user's price if they set one, else the provider's
     /// list price. Nil for on-device models and remote models with no known price.
     func price(for model: FormattingModel) -> TokenPrice? {
-        if let saved = tokenPrices[model.modelID] { return saved }
+        tokenPrices[model.modelID] ?? listPrice(for: model)
+    }
+
+    /// The provider's published price for `model`. Nil for on-device models and remote
+    /// models with no known price.
+    func listPrice(for model: FormattingModel) -> TokenPrice? {
         switch model.provider {
         case .appleOnDevice: return nil
         case .groq:          return GroqModel(rawValue: model.modelID)?.listPrice
+        case .openRouter:    return OpenRouterModel(rawValue: model.modelID)?.listPrice
         }
     }
 

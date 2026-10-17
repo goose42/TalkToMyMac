@@ -17,6 +17,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private let transcriptionRouter: TranscriptionRouter
     private let formatter: FoundationModelFormatter
     private let groqFormatter: GroqFormatter
+    private let openRouterFormatter: OpenRouterFormatter
     private let settings: FormattingSettings
     private let shortcuts: ShortcutManager
     private let transcriptionStore: TranscriptionStore
@@ -26,13 +27,15 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     init(speechService: SpeechTranscriptionService, parakeetService: ParakeetTranscriptionService,
          transcriptionRouter: TranscriptionRouter,
          formatter: FoundationModelFormatter,
-         groqFormatter: GroqFormatter, settings: FormattingSettings, shortcuts: ShortcutManager, transcriptionStore: TranscriptionStore,
+         groqFormatter: GroqFormatter, openRouterFormatter: OpenRouterFormatter,
+         settings: FormattingSettings, shortcuts: ShortcutManager, transcriptionStore: TranscriptionStore,
          floatingIndicator: FloatingIndicatorController) {
         self.speechService = speechService
         self.parakeetService = parakeetService
         self.transcriptionRouter = transcriptionRouter
         self.formatter = formatter
         self.groqFormatter = groqFormatter
+        self.openRouterFormatter = openRouterFormatter
         self.settings = settings
         self.shortcuts = shortcuts
         self.transcriptionStore = transcriptionStore
@@ -57,7 +60,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         let root = SettingsRootView(
             speechService: speechService, parakeetService: parakeetService,
             transcriptionRouter: transcriptionRouter, formatter: formatter,
-            groqFormatter: groqFormatter, settings: settings, shortcuts: shortcuts,
+            groqFormatter: groqFormatter, openRouterFormatter: openRouterFormatter,
+            settings: settings, shortcuts: shortcuts,
             transcriptionStore: transcriptionStore, floatingIndicator: floatingIndicator,
             dictionaryEditor: dictionaryEditor
         )
@@ -99,6 +103,7 @@ private struct SettingsRootView: View {
     let transcriptionRouter: TranscriptionRouter
     let formatter: FoundationModelFormatter
     let groqFormatter: GroqFormatter
+    let openRouterFormatter: OpenRouterFormatter
     let settings: FormattingSettings
     let shortcuts: ShortcutManager
     let transcriptionStore: TranscriptionStore
@@ -133,7 +138,8 @@ private struct SettingsRootView: View {
         case .formatting:
             FormattingView(formatter: formatter, settings: settings)
         case .models:
-            ModelsView(groqFormatter: groqFormatter, parakeetService: parakeetService, settings: settings)
+            ModelsView(groqFormatter: groqFormatter, openRouterFormatter: openRouterFormatter,
+                       parakeetService: parakeetService, settings: settings)
         case .transcriptions:
             TranscriptionsView(store: transcriptionStore)
         case .instrumentation:

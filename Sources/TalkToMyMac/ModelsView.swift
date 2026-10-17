@@ -7,6 +7,7 @@ import TalkToMyMacCore
 @available(macOS 26.0, *)
 struct ModelsView: View {
     let groqFormatter: GroqFormatter
+    let openRouterFormatter: OpenRouterFormatter
     let parakeetService: ParakeetTranscriptionService
     @Bindable var settings: FormattingSettings
 
@@ -51,6 +52,7 @@ struct ModelsView: View {
             .onAppear { summaryRefresh += 1 }
             .navigationDestination(for: ProviderConfigurationRoute.self) { route in
                 ProviderConfigurationView(provider: route.provider, groqFormatter: groqFormatter,
+                                          openRouterFormatter: openRouterFormatter,
                                           settings: settings) { path.removeLast() }
             }
         }

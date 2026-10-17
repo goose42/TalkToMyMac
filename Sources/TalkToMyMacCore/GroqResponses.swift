@@ -3,12 +3,27 @@ import Foundation
 /// Models offered for Groq formatting. The raw value is Groq's model ID.
 public enum GroqModel: String, CaseIterable, Hashable, Sendable {
     case gptOss20b = "openai/gpt-oss-20b"
+    case gptOss120b = "openai/gpt-oss-120b"
+    case llama31_8bInstant = "llama-3.1-8b-instant"
+    case llama33_70bVersatile = "llama-3.3-70b-versatile"
 
     public static let `default`: GroqModel = .gptOss20b
 
     public var displayName: String {
         switch self {
-        case .gptOss20b: return "GPT-OSS 20B"
+        case .gptOss20b:            return "GPT-OSS 20B"
+        case .gptOss120b:           return "GPT-OSS 120B"
+        case .llama31_8bInstant:    return "Llama 3.1 8B Instant"
+        case .llama33_70bVersatile: return "Llama 3.3 70B Versatile"
+        }
+    }
+
+    /// Whether the model takes a reasoning effort. Llama models don't reason and Groq
+    /// rejects the parameter for them.
+    public var supportsReasoning: Bool {
+        switch self {
+        case .gptOss20b, .gptOss120b:                  return true
+        case .llama31_8bInstant, .llama33_70bVersatile: return false
         }
     }
 }
@@ -37,8 +52,8 @@ public enum GroqResponses {
     public static let endpoint = URL(string: "https://api.groq.com/openai/v1/responses")!
 
     /// A POST that formats `input` under `instructions`. Sampling matches the on-device
-    /// formatter; reasoning effort is kept low since cleanup needs little thought and
-    /// latency matters more.
+    /// formatter; reasoning effort, for models that reason, is kept low since cleanup needs
+    /// little thought and latency matters more.
     public static func makeRequest(apiKey: String, model: GroqModel,
                                    instructions: String, input: String) -> URLRequest {
         var request = URLRequest(url: endpoint)
@@ -46,7 +61,7 @@ public enum GroqResponses {
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         let body = RequestBody(model: model.rawValue, instructions: instructions, input: input,
-                               temperature: 0.2, maxOutputTokens: 2048, reasoning: .init(effort: "low"))
+                               temperature: 0.2, maxOutputTokens: 2048, reasoning: model.supportsReasoning ? .init(effort: "low") : nil)
         request.httpBody = try? JSONEncoder().encode(body)
         return request
     }
@@ -89,7 +104,7 @@ public enum GroqResponses {
         let input: String
         let temperature: Double
         let maxOutputTokens: Int
-        let reasoning: Reasoning
+        let reasoning: Reasoning?
 
         enum CodingKeys: String, CodingKey {
             case model, instructions, input, temperature, reasoning
