@@ -14,6 +14,18 @@ public enum FormattingProvider: String, CaseIterable, Hashable, Sendable {
         case .groq:          return "Groq"
         }
     }
+
+    /// Whether the provider has a settings page of its own (API key, model, prices). Apple's
+    /// on-device model needs no setup.
+    public var hasConfiguration: Bool {
+        switch self {
+        case .appleOnDevice: return false
+        case .groq:          return true
+        }
+    }
+
+    /// The providers with a settings page, in display order.
+    public static var configurable: [FormattingProvider] { allCases.filter(\.hasConfiguration) }
 }
 
 /// A specific model on a specific provider — the unit formatting metrics are kept per.

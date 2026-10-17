@@ -19,4 +19,11 @@ public enum DeterministicCleanup {
     public static func applyDictionary(_ text: String, dictionary: [DictionaryEntry]) -> String {
         DictionaryReplacement.apply(dictionary, to: DictionaryReplacement.commands(dictionary, in: text))
     }
+
+    /// Whether full cleanup runs on `text`. It's English-only for now: it runs when
+    /// English is the chosen `language` (an ISO code), or when no language is chosen and `text`
+    /// is detected as English or can't be detected. Otherwise only the dictionary is applied.
+    public static func runs(on text: String, language: String?) -> Bool {
+        TranscriptCleaner.isEnglishIgnoringFillers(text, language: language)
+    }
 }

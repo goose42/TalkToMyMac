@@ -24,6 +24,12 @@ public enum PromptPreset: String, CaseIterable, Hashable, Sendable {
         }
     }
 
+    /// Whether `instructions` differ from the preset's built-in text (for `.custom`, which
+    /// has none: whether anything has been written).
+    public func isEdited(_ instructions: String) -> Bool {
+        instructions != (self.instructions ?? "")
+    }
+
     /// The preset's built-in system prompt, or `nil` for `.custom` (which has no
     /// built-in text — the caller supplies its own instructions).
     public var instructions: String? {

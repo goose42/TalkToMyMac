@@ -28,7 +28,8 @@ final class TranscriptionRouter: SpeechTranscribing, @unchecked Sendable {
         case .appleOnDevice:
             return await apple.transcribe(samples: samples, sampleRate: sampleRate)
         case .parakeetTDTv3:
-            if let outcome = await parakeet.transcribe(samples: samples, sampleRate: sampleRate) {
+            if let outcome = await parakeet.transcribe(samples: samples, sampleRate: sampleRate,
+                                                       language: settings.parakeetLanguage) {
                 return outcome
             }
             // Don't lose the dictation: retry it with Apple's model.

@@ -53,4 +53,24 @@ final class DeterministicCleanupTests: XCTestCase {
     func testFillerOnlyTextBecomesEmpty() {
         XCTAssertEqual(DeterministicCleanup.apply("uh, um... hmm", dictionary: []), "")
     }
+
+    // MARK: runs(on:language:) — cleanup is English-only for now
+
+    func testRunsOnEnglishWhenEnglishIsChosen() {
+        XCTAssertTrue(DeterministicCleanup.runs(on: "um send it today", language: "en"))
+    }
+
+    func testSkipsWhenAnotherLanguageIsChosen() {
+        XCTAssertFalse(DeterministicCleanup.runs(on: "um send it today", language: "de"))
+        XCTAssertFalse(DeterministicCleanup.runs(on: "Wir treffen uns um acht", language: "fr"))
+    }
+
+    func testDetectsTheLanguageWhenAutomatic() {
+        XCTAssertTrue(DeterministicCleanup.runs(on: "I think we should meet at three tomorrow", language: nil))
+        XCTAssertFalse(DeterministicCleanup.runs(on: "Wir treffen uns morgen um acht Uhr im Büro", language: nil))
+    }
+
+    func testRunsWhenTheLanguageCantBeDetected() {
+        XCTAssertTrue(DeterministicCleanup.runs(on: "uh, um", language: nil))
+    }
 }

@@ -29,13 +29,21 @@ public enum TranscriptCleaner {
         let ranges = text.ranges(of: /[\p{L}\p{M}\p{N}_'’-]+/)
         let ends = ranges.dropFirst().map(\.lowerBound) + [text.endIndex]
         let tokens = zip(ranges, ends).map { Token(word: String(text[$0]), trailing: String(text[$0.upperBound..<$1])) }
-        let spoken = tokens.map(\.word).filter { !fillers.contains($0.lowercased()) }.joined(separator: " ")
-        guard isEnglish(spoken, language: language) else { return text.trimmingCharacters(in: .whitespacesAndNewlines) }
+        guard isEnglish(spokenWords(tokens.map(\.word)), language: language) else { return text.trimmingCharacters(in: .whitespacesAndNewlines) }
         let leading = text[..<(ranges.first?.lowerBound ?? text.endIndex)]
         let rebuilt = String(leading) + destutter(dropRepairs(dropFillers(tokens))).map { $0.word + $0.trailing }.joined()
         var result = rebuilt.replacing(/\ {2,}/, with: " ").trimmingCharacters(in: .whitespacesAndNewlines)
         if result.hasSuffix(",") { result.removeLast() }
         return result.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Like `isEnglish(_:language:)`, but ignores filled pauses, which would throw off detection.
+    public static func isEnglishIgnoringFillers(_ text: String, language: String?) -> Bool {
+        isEnglish(spokenWords(text.matches(of: /[\p{L}\p{M}\p{N}_'’-]+/).map { String($0.output) }), language: language)
+    }
+
+    private static func spokenWords(_ words: [String]) -> String {
+        words.filter { !fillers.contains($0.lowercased()) }.joined(separator: " ")
     }
 
     /// Uses the chosen language, or detects it when the language is automatic; undetectable text counts as English.
