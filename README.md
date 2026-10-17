@@ -18,7 +18,7 @@ for paste). Set System Settings → Keyboard → "Press 🌐 key to" → **Do No
 Fn will also open the emoji picker / switch input source.
 
 Press **Esc** during either to discard the recording entirely (nothing is transcribed and
-the audio file is deleted). Esc is only captured while recording, so it keeps working
+no audio is saved). Esc is only captured while recording, so it keeps working
 normally in other apps the rest of the time.
 
 Your speech is transcribed on-device with Apple's `SpeechAnalyzer`, cleaned up on-device by

@@ -129,8 +129,8 @@ private struct TranscriptionRow: View {
 
 // MARK: - Detail
 
-/// One dictation, step by step: what speech-to-text heard, what deterministic cleanup changed,
-/// and what the LLM delivered. Up and down arrows in the top-right corner step to the newer
+/// One dictation, step by step: its recording, what speech-to-text heard, what deterministic
+/// cleanup changed, and what the LLM delivered. Up and down arrows in the top-right corner step to the newer
 /// and older dictation in place, so the back arrow still returns straight to the list.
 @available(macOS 26.0, *)
 private struct TranscriptionDetailView: View {
@@ -143,6 +143,7 @@ private struct TranscriptionDetailView: View {
     @State private var detail: TranscriptionDetail?
     @State private var newerID: String?
     @State private var olderID: String?
+    @State private var player = RecordingPlayer()
 
     init(store: TranscriptionStore, id: String, onBack: @escaping () -> Void) {
         self.store = store
@@ -168,6 +169,7 @@ private struct TranscriptionDetailView: View {
         .navigationTitle(detail.map { $0.record.timestamp.formatted(date: .abbreviated, time: .shortened) }
                          ?? "Transcription")
         .onAppear(perform: reload)
+        .onDisappear { player.stop() }
         .onReceive(NotificationCenter.default.publisher(for: TranscriptionStore.didChangeNotification)) { _ in
             reload()
         }
@@ -176,11 +178,13 @@ private struct TranscriptionDetailView: View {
     private func reload() {
         detail = store.detail(id: id)
         (newerID, olderID) = store.neighbors(of: id)
+        player.load(detail == nil ? nil : AudioCapture.recordingURL(id: id))
     }
 
     private func show(_ newID: String?) {
         guard let newID else { return }
         id = newID
+        player.stop()
         reload()
     }
 
@@ -212,6 +216,11 @@ private struct TranscriptionDetailView: View {
         let metrics = detail.metrics
         return Form {
             Section {
+                if player.isAvailable {
+                    RecordingRow(player: player)
+                } else {
+                    missing("No recording: it was purged, or wasn't saved for this dictation.")
+                }
                 if let text = detail.rawText {
                     StageText(text: text)
                 } else {
@@ -288,6 +297,43 @@ private struct TranscriptionDetailView: View {
 
     private static func milliseconds(_ value: Double) -> String {
         value.formatted(.number.precision(.fractionLength(0))) + " ms"
+    }
+}
+
+/// Play/pause, a scrubber, and the position within the recording.
+@available(macOS 26.0, *)
+private struct RecordingRow: View {
+    let player: RecordingPlayer
+
+    var body: some View {
+        LabeledContent("Recording") {
+            HStack(spacing: 8) {
+                Button(action: player.togglePlayback) {
+                    Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
+                        .frame(width: 16)
+                }
+                .buttonStyle(.borderless)
+                .help(player.isPlaying ? "Pause" : "Play recording")
+
+                // Redraws only while playing, to move the scrubber along.
+                TimelineView(.animation(minimumInterval: 0.1, paused: !player.isPlaying)) { _ in
+                    HStack(spacing: 8) {
+                        Slider(value: Binding(get: { player.currentTime }, set: { player.currentTime = $0 }),
+                               in: 0...max(player.duration, 0.1))
+                            .controlSize(.small)
+                            .frame(width: 160)
+                        Text("\(Self.time(player.currentTime)) / \(Self.time(player.duration))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
+                }
+            }
+        }
+    }
+
+    private static func time(_ seconds: TimeInterval) -> String {
+        Duration.seconds(seconds).formatted(.time(pattern: .minuteSecond))
     }
 }
 
