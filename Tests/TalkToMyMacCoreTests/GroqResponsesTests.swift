@@ -149,8 +149,7 @@ final class GroqResponsesTests: XCTestCase {
         XCTAssertEqual(GroqModel.allCases.map(\.rawValue), [
             "openai/gpt-oss-20b",
             "openai/gpt-oss-120b",
-            "llama-3.1-8b-instant",
-            "llama-3.3-70b-versatile",
+            "qwen/qwen3.8-27b",
         ])
         XCTAssertEqual(GroqModel.default, .gptOss20b)
     }
@@ -158,14 +157,13 @@ final class GroqResponsesTests: XCTestCase {
     func testOnlyReasoningModelsSendReasoningEffort() throws {
         XCTAssertTrue(GroqModel.gptOss20b.supportsReasoning)
         XCTAssertTrue(GroqModel.gptOss120b.supportsReasoning)
-        XCTAssertFalse(GroqModel.llama31_8bInstant.supportsReasoning)
-        XCTAssertFalse(GroqModel.llama33_70bVersatile.supportsReasoning)
+        XCTAssertFalse(GroqModel.qwen38_27b.supportsReasoning)
 
-        // Llama models reject the reasoning parameter, so it is left out of their requests.
-        let request = GroqResponses.makeRequest(apiKey: "gsk_test", model: .llama33_70bVersatile,
+        // Only gpt-oss takes reasoning effort "low", so it's left out of other models' requests.
+        let request = GroqResponses.makeRequest(apiKey: "gsk_test", model: .qwen38_27b,
                                                 instructions: "Clean this up.", input: "hi")
         let body = try body(of: request)
-        XCTAssertEqual(body["model"] as? String, "llama-3.3-70b-versatile")
+        XCTAssertEqual(body["model"] as? String, "qwen/qwen3.8-27b")
         XCTAssertNil(body["reasoning"])
     }
 

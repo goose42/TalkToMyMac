@@ -59,10 +59,11 @@ final class TokenPriceTests: XCTestCase {
     func testGroqListPricesForAddedModels() {
         XCTAssertEqual(GroqModel.gptOss120b.listPrice,
                        TokenPrice(inputPerMillion: 0.15, cachedInputPerMillion: 0.075, outputPerMillion: 0.60))
-        XCTAssertEqual(GroqModel.llama31_8bInstant.listPrice,
-                       TokenPrice(inputPerMillion: 0.05, cachedInputPerMillion: 0.05, outputPerMillion: 0.08))
-        XCTAssertEqual(GroqModel.llama33_70bVersatile.listPrice,
-                       TokenPrice(inputPerMillion: 0.59, cachedInputPerMillion: 0.59, outputPerMillion: 0.79))
+    }
+
+    // Groq doesn't publish these prices; the user enters them in Settings.
+    func testGroqModelsWithoutPublishedPriceHaveNoListPrice() {
+        XCTAssertNil(GroqModel.qwen38_27b.listPrice)
     }
 
     func testPriceRoundTripsThroughJSON() throws {

@@ -4,26 +4,24 @@ import Foundation
 public enum GroqModel: String, CaseIterable, Hashable, Sendable {
     case gptOss20b = "openai/gpt-oss-20b"
     case gptOss120b = "openai/gpt-oss-120b"
-    case llama31_8bInstant = "llama-3.1-8b-instant"
-    case llama33_70bVersatile = "llama-3.3-70b-versatile"
+    case qwen38_27b = "qwen/qwen3.8-27b"
 
     public static let `default`: GroqModel = .gptOss20b
 
     public var displayName: String {
         switch self {
-        case .gptOss20b:            return "GPT-OSS 20B"
-        case .gptOss120b:           return "GPT-OSS 120B"
-        case .llama31_8bInstant:    return "Llama 3.1 8B Instant"
-        case .llama33_70bVersatile: return "Llama 3.3 70B Versatile"
+        case .gptOss20b:  return "GPT-OSS 20B"
+        case .gptOss120b: return "GPT-OSS 120B"
+        case .qwen38_27b: return "Qwen 3.8 27B"
         }
     }
 
-    /// Whether the model takes a reasoning effort. Llama models don't reason and Groq
-    /// rejects the parameter for them.
+    /// Whether to send reasoning effort "low". Only gpt-oss takes that value; other models
+    /// are sent no reasoning parameter.
     public var supportsReasoning: Bool {
         switch self {
-        case .gptOss20b, .gptOss120b:                  return true
-        case .llama31_8bInstant, .llama33_70bVersatile: return false
+        case .gptOss20b, .gptOss120b: return true
+        case .qwen38_27b:             return false
         }
     }
 }

@@ -187,15 +187,13 @@ public extension TokenTotals {
 }
 
 public extension GroqModel {
-    /// Groq's published price when this version was written (https://groq.com/pricing).
-    /// Llama models get no prompt-cache discount, so their cached rate is the input rate.
-    /// Users can override it in Settings when Groq's pricing changes.
-    var listPrice: TokenPrice {
+    /// Groq's published price when this version was written (https://groq.com/pricing), or
+    /// nil for models whose price wasn't published; users enter or override prices in Settings.
+    var listPrice: TokenPrice? {
         switch self {
-        case .gptOss20b:            return TokenPrice(inputPerMillion: 0.075, cachedInputPerMillion: 0.0375, outputPerMillion: 0.30)
-        case .gptOss120b:           return TokenPrice(inputPerMillion: 0.15, cachedInputPerMillion: 0.075, outputPerMillion: 0.60)
-        case .llama31_8bInstant:    return TokenPrice(inputPerMillion: 0.05, cachedInputPerMillion: 0.05, outputPerMillion: 0.08)
-        case .llama33_70bVersatile: return TokenPrice(inputPerMillion: 0.59, cachedInputPerMillion: 0.59, outputPerMillion: 0.79)
+        case .gptOss20b:  return TokenPrice(inputPerMillion: 0.075, cachedInputPerMillion: 0.0375, outputPerMillion: 0.30)
+        case .gptOss120b: return TokenPrice(inputPerMillion: 0.15, cachedInputPerMillion: 0.075, outputPerMillion: 0.60)
+        case .qwen38_27b: return nil
         }
     }
 }
