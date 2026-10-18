@@ -64,11 +64,11 @@ setup-signing:
 #
 # `build` runs via a recursive $(MAKE) because SIGN_ID is resolved when the Makefile is
 # parsed — a plain prerequisite would still see the pre-setup (empty) identity and fall
-# back to ad-hoc signing on the very first install.
+# back to ad-hoc signing on the very first install. The running app is quit before building.
 install:
+	-@pkill -x $(APP_NAME) && sleep 0.5 || true
 	@bash scripts/setup-signing.sh
 	@$(MAKE) --no-print-directory build
-	-@pkill -x $(APP_NAME) && sleep 0.5 || true
 	@echo "Installing to $(INSTALLED_APP)…"
 	@rm -rf "$(INSTALLED_APP)"
 	@ditto $(APP_BUNDLE) "$(INSTALLED_APP)"
@@ -88,9 +88,11 @@ uninstall:
 	@echo "Settings, recordings, and the signing certificate were left in place."
 
 # `open` only re-activates an already-running instance, which would silently keep the old
-# binary alive — quit it first so the fresh build is what actually launches.
-run: build
+# binary alive — quit it before building so the fresh build is what actually launches.
+# `build` runs via $(MAKE) so the quit is guaranteed to happen first.
+run:
 	-@pkill -x $(APP_NAME) && sleep 0.5 || true
+	@$(MAKE) --no-print-directory build
 	open $(APP_BUNDLE)
 
 test:
