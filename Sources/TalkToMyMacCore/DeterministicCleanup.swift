@@ -2,7 +2,8 @@
 /// before (and independently of) LLM formatting.
 public enum DeterministicCleanup {
     /// Drops fillers, self-repairs and stutters; on English text also applies voice commands,
-    /// spoken numbers and email layout; finally swaps in the dictionary's written forms.
+    /// spoken numbers, email layout and short-dictation casing; finally swaps in the dictionary's
+    /// written forms, so a term keeps its casing even at the start of a short dictation.
     /// Other languages are only trimmed and dictionary-corrected.
     public static func apply(_ text: String, dictionary: [DictionaryEntry]) -> String {
         let cleaned = TranscriptCleaner.clean(text, language: nil)
@@ -10,6 +11,7 @@ public enum DeterministicCleanup {
         if TranscriptCleaner.isEnglish(spoken, language: nil) {
             spoken = VoiceCommands.apply(spoken)
             spoken = EmailDictation.compose(spoken) ?? spoken
+            spoken = ShortDictation.apply(spoken)
         }
         return DictionaryReplacement.apply(dictionary, to: spoken)
             .trimmingCharacters(in: .whitespacesAndNewlines)
