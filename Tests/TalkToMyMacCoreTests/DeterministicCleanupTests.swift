@@ -54,6 +54,19 @@ final class DeterministicCleanupTests: XCTestCase {
         XCTAssertEqual(DeterministicCleanup.apply("uh, um... hmm", dictionary: []), "")
     }
 
+    func testShortDictationDropsPeriodAndCapital() {
+        XCTAssertEqual(DeterministicCleanup.apply("um sounds good.", dictionary: []), "sounds good")
+    }
+
+    func testShortDictationKeepsDictionaryCasing() {
+        let dictionary = [DictionaryEntry(written: "GitHub", type: .properNoun, soundsLike: ["github"])]
+        XCTAssertEqual(DeterministicCleanup.apply("Github please.", dictionary: dictionary), "GitHub please")
+    }
+
+    func testShortDictationLeavesOtherLanguagesAlone() {
+        XCTAssertEqual(DeterministicCleanup.apply("Danke schön.", dictionary: []), "Danke schön.")
+    }
+
     // MARK: runs(on:language:) — cleanup is English-only for now
 
     func testRunsOnEnglishWhenEnglishIsChosen() {
