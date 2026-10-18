@@ -84,7 +84,9 @@ public class RecorderController: @unchecked Sendable {
 
         case (.cancel, .recording),
              (.holdInterrupted, .recording) where activeMode == .hold:
-            return outcome(of: stop(), onSuccess: .discarded)
+            let result = outcome(of: stop(), onSuccess: .discarded)
+            formatter?.endWarming()
+            return result
 
         default:
             // Key auto-repeat, hold events during a toggle recording, or Esc when idle.
@@ -117,6 +119,7 @@ public class RecorderController: @unchecked Sendable {
         }
 
         systemAudio?.muteForRecording()
+        formatter?.beginWarming()
         indicator.setRecording(true)
         state = .recording
         activeMode = mode
@@ -146,6 +149,10 @@ public class RecorderController: @unchecked Sendable {
         let recordingID = UUID()
         defer { archiver?.archive(samples: samples, sampleRate: sampleRate, id: recordingID) }
         let clock = ContinuousClock()
+        // Warming started with the recording and carries on through transcription and
+        // review, so the formatter is still ready when step 4 runs; however this returns,
+        // it's no longer needed.
+        defer { formatter?.endWarming() }
 
         // 1. Denoise (optional)
         let processedSamples = denoiser?.denoise(samples: samples) ?? samples

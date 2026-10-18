@@ -91,6 +91,8 @@ final class MockFormatter: TextFormatting {
     var lastInput: String?
     var shouldFormatResult = true
     var lastWordCount: Int?
+    var beginWarmingCount = 0
+    var endWarmingCount = 0
 
     init(result: String? = nil) {
         self.formatResult = result
@@ -106,6 +108,9 @@ final class MockFormatter: TextFormatting {
         lastInput = raw
         return FormattingOutcome(model: model, text: formatResult, usage: usage)
     }
+
+    func beginWarming() { beginWarmingCount += 1 }
+    func endWarming() { endWarmingCount += 1 }
 }
 
 final class MockCleaner: TextCleaning {
@@ -270,6 +275,99 @@ final class RecorderControllerTests: XCTestCase {
         // Can start again
         _ = ctrl.toggle()
         XCTAssertEqual(ctrl.state, .recording)
+    }
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // MARK: Formatter warming
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    func testFormatterWarmsWhenRecordingStarts() {
+        let fmt = MockFormatter()
+        let (ctrl, _, _, _) = makeController(formatter: fmt)
+        _ = ctrl.handle(.holdPressed)
+        XCTAssertEqual(fmt.beginWarmingCount, 1)
+        XCTAssertEqual(fmt.endWarmingCount, 0)
+    }
+
+    // Formatting comes after transcription, so stopping the recording must not end warming.
+    func testFormatterKeepsWarmingWhenRecordingStops() {
+        let fmt = MockFormatter()
+        let (ctrl, _, _, _) = makeController(formatter: fmt)
+        _ = ctrl.handle(.holdPressed)
+        _ = ctrl.handle(.holdReleased)
+        XCTAssertEqual(fmt.endWarmingCount, 0)
+    }
+
+    func testFormatterNotWarmedWhenPermissionDenied() {
+        let fmt = MockFormatter()
+        let (ctrl, _, _, _) = makeController(permission: .denied, formatter: fmt)
+        _ = ctrl.handle(.holdPressed)
+        XCTAssertEqual(fmt.beginWarmingCount, 0)
+    }
+
+    func testFormatterNotWarmedWhenRecorderFailsToStart() {
+        let rec = MockRecorder()
+        rec.shouldFailStart = true
+        let fmt = MockFormatter()
+        let (ctrl, _, _, _) = makeController(recorder: rec, formatter: fmt)
+        _ = ctrl.handle(.holdPressed)
+        XCTAssertEqual(fmt.beginWarmingCount, 0)
+    }
+
+    func testFormatterWarmingEndsWhenRecordingCancelled() {
+        let fmt = MockFormatter()
+        let (ctrl, _, _, _) = makeController(formatter: fmt)
+        _ = ctrl.handle(.holdPressed)
+        _ = ctrl.handle(.cancel)
+        XCTAssertEqual(fmt.endWarmingCount, 1)
+    }
+
+    func testFormatterWarmingEndsWhenHoldInterrupted() {
+        let fmt = MockFormatter()
+        let (ctrl, _, _, _) = makeController(formatter: fmt)
+        _ = ctrl.handle(.holdPressed)
+        _ = ctrl.handle(.holdInterrupted)
+        XCTAssertEqual(fmt.endWarmingCount, 1)
+    }
+
+    func testFormatterWarmingEndsAfterFormatting() async {
+        let fmt = MockFormatter(result: "Formatted")
+        let (ctrl, _, _, _) = makeController(transcriber: MockTranscriber(), formatter: fmt)
+        _ = await ctrl.processRecording(samples: [1.0], sampleRate: 16000)
+        XCTAssertEqual(fmt.formatCallCount, 1)
+        XCTAssertEqual(fmt.endWarmingCount, 1)
+    }
+
+    func testFormatterWarmingEndsWhenFormattingSkipped() async {
+        let fmt = MockFormatter(result: "Formatted")
+        fmt.shouldFormatResult = false
+        let (ctrl, _, _, _) = makeController(transcriber: MockTranscriber(), formatter: fmt)
+        _ = await ctrl.processRecording(samples: [1.0], sampleRate: 16000)
+        XCTAssertEqual(fmt.formatCallCount, 0)
+        XCTAssertEqual(fmt.endWarmingCount, 1)
+    }
+
+    func testFormatterWarmingEndsWhenReviewCancelled() async {
+        let fmt = MockFormatter(result: "Formatted")
+        let (ctrl, _, _, _) = makeController(transcriber: MockTranscriber(),
+                                             reviewer: MockReviewer(result: nil), formatter: fmt)
+        _ = await ctrl.processRecording(samples: [1.0], sampleRate: 16000)
+        XCTAssertEqual(fmt.formatCallCount, 0)
+        XCTAssertEqual(fmt.endWarmingCount, 1)
+    }
+
+    func testFormatterWarmingEndsWhenNothingTranscribed() async {
+        let fmt = MockFormatter(result: "Formatted")
+        let (ctrl, _, _, _) = makeController(transcriber: MockTranscriber(result: nil), formatter: fmt)
+        _ = await ctrl.processRecording(samples: [1.0], sampleRate: 16000)
+        XCTAssertEqual(fmt.endWarmingCount, 1)
+    }
+
+    func testFormatterWarmingEndsWhenTranscriberNotReady() async {
+        let fmt = MockFormatter(result: "Formatted")
+        let (ctrl, _, _, _) = makeController(transcriber: MockTranscriber(isReady: false), formatter: fmt)
+        _ = await ctrl.processRecording(samples: [1.0], sampleRate: 16000)
+        XCTAssertEqual(fmt.endWarmingCount, 1)
     }
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
