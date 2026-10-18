@@ -69,10 +69,19 @@ public protocol TextFormatting: AnyObject {
     /// Formats `raw`, reporting which model ran and what it cost. A nil `text` means the
     /// attempt failed and the raw transcript should be delivered.
     func format(raw: String) async -> FormattingOutcome
+    /// Called when a recording starts, so the formatter can get ready (e.g. prewarm a model)
+    /// while the user speaks. Default implementation is a no-op.
+    func beginWarming()
+    /// Called once the recording's transcript no longer needs formatting — after
+    /// `format(raw:)`, or when it was skipped, discarded or nothing was heard. Default
+    /// implementation is a no-op.
+    func endWarming()
 }
 
 public extension TextFormatting {
     func shouldFormat(wordCount: Int) -> Bool { true }
+    func beginWarming() {}
+    func endWarming() {}
 }
 
 /// Output delivery (clipboard, text field injection, etc.).

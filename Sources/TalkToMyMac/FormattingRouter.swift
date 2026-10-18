@@ -10,6 +10,8 @@ import TalkToMyMacCore
 /// When a remote provider fails outright, the router also pauses it for an hour (see
 /// `FormattingPause`); while paused, transcripts go out unformatted. A timeout alone
 /// doesn't pause, since a slow response isn't a sign the next one will fail.
+///
+/// Warming is passed to the on-device model only, when it's the provider that will run.
 /// `@unchecked Sendable`: holds only immutable references to thread-agnostic objects.
 @available(macOS 26.0, *)
 final class FormattingRouter: TextFormatting, @unchecked Sendable {
@@ -39,6 +41,15 @@ final class FormattingRouter: TextFormatting, @unchecked Sendable {
         print("[FormattingRouter] Skipping formatting: \(wordCount) word(s) "
               + "doesn't exceed the \(settings.formattingWordThreshold)-word threshold")
         return false
+    }
+
+    func beginWarming() {
+        guard settings.isEnabled, settings.activePause == nil, settings.provider == .appleOnDevice else { return }
+        onDevice.beginWarming()
+    }
+
+    func endWarming() {
+        onDevice.endWarming()
     }
 
     func format(raw: String) async -> FormattingOutcome {
