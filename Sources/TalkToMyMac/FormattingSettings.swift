@@ -17,7 +17,13 @@ final class FormattingSettings: @unchecked Sendable {
         static let promptPreset = "promptPreset"
         static let customInstructions = "customInstructions"
         static let autoPasteEnabled = "autoPasteEnabled"
-        static let muteSystemAudioWhileRecording = "muteSystemAudioWhileRecording"
+        static let systemAudioAction = "systemAudioAction"
+        static let systemAudioDampenLevel = "systemAudioDampenLevel"
+        static let systemAudioAllDevices = "systemAudioAllDevices"
+        static let systemAudioDeviceUIDs = "systemAudioDeviceUIDs"
+        static let systemAudioDeviceNames = "systemAudioDeviceNames"
+        /// On/off toggle from before the Audio tab; migrated into `systemAudioAction` on launch.
+        static let legacyMuteSystemAudioWhileRecording = "muteSystemAudioWhileRecording"
         static let skipShortDictations = "skipShortDictations"
         static let formattingWordThreshold = "formattingWordThreshold"
         static let dictionaryJSON = "dictionaryJSON"
@@ -153,9 +159,37 @@ final class FormattingSettings: @unchecked Sendable {
         didSet { UserDefaults.standard.set(autoPasteEnabled, forKey: Keys.autoPasteEnabled) }
     }
 
-    /// Whether the Mac's sound output is muted for the length of each recording.
-    var muteSystemAudioWhileRecording: Bool {
-        didSet { UserDefaults.standard.set(muteSystemAudioWhileRecording, forKey: Keys.muteSystemAudioWhileRecording) }
+    /// What happens to the Mac's sound output for the length of each recording.
+    var systemAudioAction: SystemAudioAction {
+        didSet { UserDefaults.standard.set(systemAudioAction.rawValue, forKey: Keys.systemAudioAction) }
+    }
+
+    /// Fraction of the current volume to lower to when `systemAudioAction` is `.dampen`.
+    var systemAudioDampenLevel: Double {
+        didSet { UserDefaults.standard.set(systemAudioDampenLevel, forKey: Keys.systemAudioDampenLevel) }
+    }
+
+    /// Whether `systemAudioAction` applies whatever the output device is, or only when it's
+    /// one of `systemAudioDeviceUIDs`.
+    var systemAudioAllDevices: Bool {
+        didSet { UserDefaults.standard.set(systemAudioAllDevices, forKey: Keys.systemAudioAllDevices) }
+    }
+
+    /// CoreAudio UIDs of the output devices `systemAudioAction` applies to when
+    /// `systemAudioAllDevices` is off.
+    var systemAudioDeviceUIDs: Set<String> {
+        didSet { UserDefaults.standard.set(systemAudioDeviceUIDs.sorted(), forKey: Keys.systemAudioDeviceUIDs) }
+    }
+
+    /// Last-seen names of output devices by UID, so selected devices that aren't connected
+    /// right now (headphones in a drawer) still show by name in Settings.
+    var systemAudioDeviceNames: [String: String] {
+        didSet { UserDefaults.standard.set(systemAudioDeviceNames, forKey: Keys.systemAudioDeviceNames) }
+    }
+
+    var systemAudioPolicy: SystemAudioPolicy {
+        SystemAudioPolicy(action: systemAudioAction, dampenLevel: systemAudioDampenLevel,
+                          scope: systemAudioAllDevices ? .all : .only(systemAudioDeviceUIDs))
     }
 
     init() {
@@ -182,7 +216,17 @@ final class FormattingSettings: @unchecked Sendable {
         isEnabled = defaults.object(forKey: Keys.llmFormattingEnabled) as? Bool ?? true
         deterministicCleanupEnabled = defaults.object(forKey: Keys.deterministicCleanupEnabled) as? Bool ?? false
         autoPasteEnabled = defaults.object(forKey: Keys.autoPasteEnabled) as? Bool ?? true
-        muteSystemAudioWhileRecording = defaults.object(forKey: Keys.muteSystemAudioWhileRecording) as? Bool ?? false
+        if let raw = defaults.string(forKey: Keys.systemAudioAction), let saved = SystemAudioAction(rawValue: raw) {
+            systemAudioAction = saved
+        } else {
+            let legacyMute = defaults.object(forKey: Keys.legacyMuteSystemAudioWhileRecording) as? Bool ?? false
+            systemAudioAction = legacyMute ? .mute : .off
+        }
+        systemAudioDampenLevel = defaults.object(forKey: Keys.systemAudioDampenLevel) as? Double
+            ?? SystemAudioPolicy.defaultDampenLevel
+        systemAudioAllDevices = defaults.object(forKey: Keys.systemAudioAllDevices) as? Bool ?? true
+        systemAudioDeviceUIDs = Set(defaults.stringArray(forKey: Keys.systemAudioDeviceUIDs) ?? [])
+        systemAudioDeviceNames = defaults.dictionary(forKey: Keys.systemAudioDeviceNames) as? [String: String] ?? [:]
         skipShortDictations = defaults.object(forKey: Keys.skipShortDictations) as? Bool ?? false
         formattingWordThreshold = defaults.object(forKey: Keys.formattingWordThreshold) as? Int ?? 3
         provider = defaults.string(forKey: Keys.formattingProvider).flatMap(FormattingProvider.init) ?? .default

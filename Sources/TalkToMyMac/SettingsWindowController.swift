@@ -133,6 +133,8 @@ private struct SettingsRootView: View {
         case .general:
             SettingsView(speechService: speechService, settings: settings,
                          shortcuts: shortcuts, floatingIndicator: floatingIndicator)
+        case .audio:
+            AudioSettingsView(settings: settings)
         case .dictionary:
             DictionaryView(editor: dictionaryEditor, settings: settings, transcriber: transcriptionRouter)
         case .formatting:
@@ -219,17 +221,6 @@ private struct SettingsView: View {
             } footer: {
                 Text("A small dot that stays above all windows and expands into a live waveform "
                      + "while recording. Drag it to move it anywhere on screen.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Section {
-                Toggle("Mute system audio while recording", isOn: $settings.muteSystemAudioWhileRecording)
-            } header: {
-                Text("Recording")
-            } footer: {
-                Text("Silences everything your Mac is playing while you dictate, and restores it "
-                     + "when the recording ends. If your Mac was already muted, it stays muted.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

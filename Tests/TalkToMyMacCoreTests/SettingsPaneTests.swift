@@ -5,13 +5,13 @@ final class SettingsPaneTests: XCTestCase {
 
     func testSidebarOrder() {
         XCTAssertEqual(SettingsPane.allCases, [
-            .general, .dictionary, .formatting, .models, .transcriptions, .instrumentation, .storage,
+            .general, .audio, .dictionary, .formatting, .models, .transcriptions, .instrumentation, .storage,
         ])
     }
 
     func testTitles() {
         XCTAssertEqual(SettingsPane.allCases.map(\.title), [
-            "General", "Dictionary", "Formatting", "Models", "Transcriptions", "Instrumentation", "Storage",
+            "General", "Audio", "Dictionary", "Formatting", "Models", "Transcriptions", "Instrumentation", "Storage",
         ])
     }
 
