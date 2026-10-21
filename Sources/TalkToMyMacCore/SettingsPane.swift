@@ -1,6 +1,7 @@
 /// A section of the settings window, in sidebar order.
 public enum SettingsPane: String, CaseIterable, Identifiable, Sendable {
     case general
+    case audio
     case dictionary
     case formatting
     case models
@@ -13,6 +14,7 @@ public enum SettingsPane: String, CaseIterable, Identifiable, Sendable {
     public var title: String {
         switch self {
         case .general:         return "General"
+        case .audio:           return "Audio"
         case .dictionary:      return "Dictionary"
         case .formatting:      return "Formatting"
         case .models:          return "Models"
@@ -26,6 +28,7 @@ public enum SettingsPane: String, CaseIterable, Identifiable, Sendable {
     public var symbol: String {
         switch self {
         case .general:         return "gearshape"
+        case .audio:           return "speaker.wave.2"
         case .dictionary:      return "character.book.closed"
         case .formatting:      return "wand.and.stars"
         case .models:          return "cpu"

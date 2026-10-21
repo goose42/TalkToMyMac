@@ -28,6 +28,10 @@ no network calls, no third-party models.
 ## Requirements
 
 - macOS 26 or later
+- Xcode 26 or later to build (the Command Line Tools alone aren't enough). `make install`
+  and `make run` check for it first — along with the active developer directory and the
+  Xcode license — and open Xcode's App Store page if it's missing. Run `make check-deps`
+  to check on its own.
 - Apple Intelligence enabled (System Settings → Apple Intelligence & Siri) for LLM formatting;
   without it, transcription still works and delivers the raw (unformatted) transcript.
 

@@ -1,4 +1,4 @@
-.PHONY: all build clean run test setup-signing install uninstall
+.PHONY: all build clean run test setup-signing install uninstall check-deps
 
 APP_NAME = TalkToMyMac
 APP_BUNDLE = build/$(APP_NAME).app
@@ -53,6 +53,11 @@ $(ICON_ICNS): $(ICON_SOURCE)
 	@iconutil -c icns build/AppIcon.iconset -o $@
 	@rm -rf build/AppIcon.iconset
 
+# Verifies macOS, Xcode (opening its App Store page if it's missing), the active developer
+# directory, the Xcode license and first-launch components. Run before `install` and `run`.
+check-deps:
+	@bash scripts/check-dependencies.sh
+
 # One-time setup: creates a self-signed code-signing certificate so TCC permissions
 # survive rebuilds. Prompts for your login password. Safe to re-run.
 setup-signing:
@@ -65,7 +70,7 @@ setup-signing:
 # `build` runs via a recursive $(MAKE) because SIGN_ID is resolved when the Makefile is
 # parsed — a plain prerequisite would still see the pre-setup (empty) identity and fall
 # back to ad-hoc signing on the very first install. The running app is quit before building.
-install:
+install: check-deps
 	-@pkill -x $(APP_NAME) && sleep 0.5 || true
 	@bash scripts/setup-signing.sh
 	@$(MAKE) --no-print-directory build
@@ -76,7 +81,7 @@ install:
 	@echo "✅ Installed $(INSTALLED_APP)"
 	open "$(INSTALLED_APP)"
 
-uninstall:
+uninstall: check-deps
 	-@pkill -x $(APP_NAME) && sleep 0.5 || true
 	@if [ -d "$(INSTALLED_APP)" ]; then \
 		$(LSREGISTER) -u "$(INSTALLED_APP)"; \
@@ -90,7 +95,7 @@ uninstall:
 # `open` only re-activates an already-running instance, which would silently keep the old
 # binary alive — quit it before building so the fresh build is what actually launches.
 # `build` runs via $(MAKE) so the quit is guaranteed to happen first.
-run:
+run: check-deps
 	-@pkill -x $(APP_NAME) && sleep 0.5 || true
 	@$(MAKE) --no-print-directory build
 	open $(APP_BUNDLE)
