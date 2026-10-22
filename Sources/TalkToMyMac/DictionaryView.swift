@@ -20,7 +20,7 @@ struct DictionaryView: View {
 
     var body: some View {
         if let selection, editor.item(selection) != nil {
-            EntryDetailView(editor: editor, transcriber: transcriber, id: selection) { self.selection = nil }
+            EntryDetailView(editor: editor, transcriber: transcriber, settings: settings, id: selection) { self.selection = nil }
                 .id(selection)
         } else {
             listPage
@@ -269,6 +269,7 @@ struct DictionaryView: View {
 private struct EntryDetailView: View {
     let editor: DictionaryEditor
     let transcriber: TranscriptionRouter
+    let settings: FormattingSettings
     let id: UUID
     let onBack: () -> Void
 
@@ -302,7 +303,7 @@ private struct EntryDetailView: View {
             .sheet(isPresented: $isRecordingPronunciation, onDismiss: {
                 if let entry = editor.item(id)?.entry { loadDrafts(from: entry) }
             }) {
-                PronunciationRecorderView(editor: editor, id: id, transcriber: transcriber)
+                PronunciationRecorderView(editor: editor, id: id, transcriber: transcriber, settings: settings)
             }
             .onChange(of: item.status) { old, new in
                 // A suggestion just landed: show it in the text fields.

@@ -2,15 +2,33 @@ import CoreAudio
 import SwiftUI
 import TalkToMyMacCore
 
-/// The Audio settings tab: what happens to the Mac's sound output while dictating, and on
-/// which output devices.
+/// The Audio settings tab: which microphone to record from, and what happens to the Mac's
+/// sound output while dictating, and on which output devices.
 @available(macOS 26.0, *)
 struct AudioSettingsView: View {
     @Bindable var settings: FormattingSettings
-    @State private var devices = OutputDeviceList()
+    @State private var devices = DeviceList()
 
     var body: some View {
         Form {
+            Section {
+                Picker("Record from", selection: $settings.inputDevice) {
+                    Text(systemDefaultMicrophoneTitle).tag(InputDeviceSelection.systemDefault)
+                    Divider()
+                    ForEach(microphoneRows) { device in
+                        Text(microphoneTitle(device)).tag(InputDeviceSelection.device(uid: device.uid))
+                    }
+                }
+            } header: {
+                Text("Microphone")
+            } footer: {
+                Text("When Bluetooth headphones connect, your Mac usually switches to their "
+                     + "microphone, which tends to sound worse. Pick a microphone to always record "
+                     + "from it instead; if it isn't connected, the system default is used.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section {
                 Picker("System audio", selection: $settings.systemAudioAction) {
                     ForEach(SystemAudioAction.allCases) { action in
@@ -64,25 +82,48 @@ struct AudioSettingsView: View {
         .formStyle(.grouped)
         .onAppear { devices.start() }
         .onDisappear { devices.stop() }
-        .onChange(of: devices.connected) { _, connected in
+        .onChange(of: devices.outputs) { _, connected in
             for device in connected where settings.systemAudioDeviceNames[device.uid] != device.name {
                 settings.systemAudioDeviceNames[device.uid] = device.name
             }
         }
+        .onChange(of: devices.inputs) { _, connected in
+            for device in connected where settings.inputDeviceNames[device.uid] != device.name {
+                settings.inputDeviceNames[device.uid] = device.name
+            }
+        }
+    }
+
+    private var systemDefaultMicrophoneTitle: String {
+        guard let name = devices.inputs.first(where: { $0.uid == devices.currentInputUID })?.name else {
+            return "System default"
+        }
+        return "System default (\(name))"
+    }
+
+    /// Connected microphones, then the chosen one if it isn't connected right now.
+    private var microphoneRows: [AudioDevices.Device] {
+        guard case .device(let uid) = settings.inputDevice,
+              !devices.inputs.contains(where: { $0.uid == uid }) else { return devices.inputs }
+        return devices.inputs + [AudioDevices.Device(uid: uid, name: settings.inputDeviceNames[uid] ?? uid)]
+    }
+
+    private func microphoneTitle(_ device: AudioDevices.Device) -> String {
+        devices.inputs.contains(device) ? device.name : "\(device.name) (not connected)"
     }
 
     /// Connected devices, then selected devices that aren't connected right now.
-    private var deviceRows: [SystemAudioMuter.OutputDevice] {
-        let connectedUIDs = Set(devices.connected.map(\.uid))
+    private var deviceRows: [AudioDevices.Device] {
+        let connectedUIDs = Set(devices.outputs.map(\.uid))
         let absent = settings.systemAudioDeviceUIDs.subtracting(connectedUIDs).sorted().map {
-            SystemAudioMuter.OutputDevice(uid: $0, name: settings.systemAudioDeviceNames[$0] ?? $0)
+            AudioDevices.Device(uid: $0, name: settings.systemAudioDeviceNames[$0] ?? $0)
         }
-        return devices.connected + absent
+        return devices.outputs + absent
     }
 
     private func note(for uid: String) -> String? {
-        if uid == devices.currentUID { return "Current output" }
-        if !devices.connected.contains(where: { $0.uid == uid }) { return "Not connected" }
+        if uid == devices.currentOutputUID { return "Current output" }
+        if !devices.outputs.contains(where: { $0.uid == uid }) { return "Not connected" }
         return nil
     }
 
@@ -99,18 +140,21 @@ struct AudioSettingsView: View {
     }
 }
 
-/// The Mac's output devices and which one is current, kept up to date while Settings shows
-/// them by listening for CoreAudio's device-list and default-output changes.
+/// The Mac's input and output devices and which ones are current, kept up to date while
+/// Settings shows them by listening for CoreAudio's device-list and default-device changes.
 @MainActor
 @Observable
-private final class OutputDeviceList {
-    private(set) var connected: [SystemAudioMuter.OutputDevice] = []
-    private(set) var currentUID: String?
+private final class DeviceList {
+    private(set) var inputs: [AudioDevices.Device] = []
+    private(set) var outputs: [AudioDevices.Device] = []
+    private(set) var currentInputUID: String?
+    private(set) var currentOutputUID: String?
 
     private var listener: AudioObjectPropertyListenerBlock?
 
     private static let watched: [AudioObjectPropertySelector] = [
-        kAudioHardwarePropertyDevices, kAudioHardwarePropertyDefaultOutputDevice,
+        kAudioHardwarePropertyDevices, kAudioHardwarePropertyDefaultInputDevice,
+        kAudioHardwarePropertyDefaultOutputDevice,
     ]
 
     func start() {
@@ -136,8 +180,10 @@ private final class OutputDeviceList {
     }
 
     private func refresh() {
-        connected = SystemAudioMuter.outputDevices()
-        currentUID = SystemAudioMuter.defaultOutputDeviceUID()
+        inputs = AudioDevices.list(.input)
+        outputs = AudioDevices.list(.output)
+        currentInputUID = AudioDevices.defaultDeviceUID(.input)
+        currentOutputUID = AudioDevices.defaultDeviceUID(.output)
     }
 
     private static func address(_ selector: AudioObjectPropertySelector) -> AudioObjectPropertyAddress {

@@ -22,6 +22,8 @@ final class FormattingSettings: @unchecked Sendable {
         static let systemAudioAllDevices = "systemAudioAllDevices"
         static let systemAudioDeviceUIDs = "systemAudioDeviceUIDs"
         static let systemAudioDeviceNames = "systemAudioDeviceNames"
+        static let inputDeviceUID = "inputDeviceUID"
+        static let inputDeviceNames = "inputDeviceNames"
         /// On/off toggle from before the Audio tab; migrated into `systemAudioAction` on launch.
         static let legacyMuteSystemAudioWhileRecording = "muteSystemAudioWhileRecording"
         static let skipShortDictations = "skipShortDictations"
@@ -187,6 +189,17 @@ final class FormattingSettings: @unchecked Sendable {
         didSet { UserDefaults.standard.set(systemAudioDeviceNames, forKey: Keys.systemAudioDeviceNames) }
     }
 
+    /// Which microphone recordings come from.
+    var inputDevice: InputDeviceSelection {
+        didSet { UserDefaults.standard.set(inputDevice.persistedUID, forKey: Keys.inputDeviceUID) }
+    }
+
+    /// Last-seen names of input devices by UID, so a chosen microphone that isn't connected
+    /// right now still shows by name in Settings.
+    var inputDeviceNames: [String: String] {
+        didSet { UserDefaults.standard.set(inputDeviceNames, forKey: Keys.inputDeviceNames) }
+    }
+
     var systemAudioPolicy: SystemAudioPolicy {
         SystemAudioPolicy(action: systemAudioAction, dampenLevel: systemAudioDampenLevel,
                           scope: systemAudioAllDevices ? .all : .only(systemAudioDeviceUIDs))
@@ -227,6 +240,8 @@ final class FormattingSettings: @unchecked Sendable {
         systemAudioAllDevices = defaults.object(forKey: Keys.systemAudioAllDevices) as? Bool ?? true
         systemAudioDeviceUIDs = Set(defaults.stringArray(forKey: Keys.systemAudioDeviceUIDs) ?? [])
         systemAudioDeviceNames = defaults.dictionary(forKey: Keys.systemAudioDeviceNames) as? [String: String] ?? [:]
+        inputDevice = InputDeviceSelection(persistedUID: defaults.string(forKey: Keys.inputDeviceUID))
+        inputDeviceNames = defaults.dictionary(forKey: Keys.inputDeviceNames) as? [String: String] ?? [:]
         skipShortDictations = defaults.object(forKey: Keys.skipShortDictations) as? Bool ?? false
         formattingWordThreshold = defaults.object(forKey: Keys.formattingWordThreshold) as? Int ?? 3
         provider = defaults.string(forKey: Keys.formattingProvider).flatMap(FormattingProvider.init) ?? .default

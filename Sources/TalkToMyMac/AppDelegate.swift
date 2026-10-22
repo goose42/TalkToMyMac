@@ -60,6 +60,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             self?.pasteDelivery.replaceLastPaste(old, with: new) ?? false
         }
         let indicatorModel = floatingIndicator.model
+        audioCapture.inputDevice = { [formattingSettings] in formattingSettings.inputDevice }
         audioCapture.onLevels = { levels in
             DispatchQueue.main.async {
                 MainActor.assumeIsolated { indicatorModel.push(levels) }
