@@ -9,6 +9,7 @@ struct PronunciationRecorderView: View {
     let editor: DictionaryEditor
     let id: UUID
     let transcriber: TranscriptionRouter
+    let settings: FormattingSettings
 
     @Environment(\.dismiss) private var dismiss
 
@@ -108,6 +109,7 @@ struct PronunciationRecorderView: View {
     // MARK: Recording
 
     private func startCapture() {
+        capture.inputDevice = { [settings] in settings.inputDevice }
         capture.onLevels = { levels in
             guard let latest = levels.last else { return }
             DispatchQueue.main.async { level = latest }

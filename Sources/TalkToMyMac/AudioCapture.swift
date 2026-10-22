@@ -1,11 +1,19 @@
 import AVFoundation
+import AudioToolbox
+import OSLog
 import TalkToMyMacCore
 
 /// Captures microphone audio via AVAudioEngine into memory. Nothing is written while recording;
 /// finished dictations are saved afterwards by `RecordingArchiver`.
 final class AudioCapture: AudioRecording {
-    private let engine = AVAudioEngine()
+    private var engine = AVAudioEngine()
+    /// UID of the microphone `engine` was pointed at, or nil if it follows the system default.
+    private var engineDeviceUID: String?
     private(set) var isRecording = false
+    private let logger = Logger(subsystem: "com.talktomymac.dictate", category: "AudioCapture")
+
+    /// Which microphone to record from, read at the start of each recording.
+    var inputDevice: () -> InputDeviceSelection = { .systemDefault }
 
     /// In-memory accumulation of raw Float32 samples (channel 0) captured during recording.
     private(set) var lastRecordingRawSamples: [Float]?
@@ -66,7 +74,31 @@ final class AudioCapture: AudioRecording {
     }
 
 
+    /// Points the engine at the chosen microphone, falling back to the system default when
+    /// it isn't connected. A fresh engine is made whenever the device changes, since one that
+    /// has already run keeps its old input format.
+    private func routeInput() {
+        let uid = inputDevice().deviceUID(connected: AudioDevices.list(.input).map(\.uid))
+        if case .device(let chosen) = inputDevice(), uid == nil {
+            logger.notice("Chosen microphone \(chosen, privacy: .public) isn't connected; using the system default")
+        }
+        guard uid != engineDeviceUID else { return }
+        engine = AVAudioEngine()
+        engineDeviceUID = nil
+        guard let uid, let device = AudioDevices.device(uid: uid),
+              let unit = engine.inputNode.audioUnit else { return }
+        var id = device
+        let status = AudioUnitSetProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0,
+                                          &id, UInt32(MemoryLayout<AudioDeviceID>.size))
+        if status == noErr {
+            engineDeviceUID = uid
+        } else {
+            logger.error("Couldn't select microphone \(uid, privacy: .public): \(status)")
+        }
+    }
+
     func start() throws {
+        routeInput()
         let inputNode = engine.inputNode
         let recordingFormat = inputNode.outputFormat(forBus: 0)
 
