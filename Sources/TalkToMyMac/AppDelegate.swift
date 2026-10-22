@@ -59,6 +59,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         floatingIndicator.rewritePaste = { [weak self] old, new in
             self?.pasteDelivery.replaceLastPaste(old, with: new) ?? false
         }
+        floatingIndicator.copyLastTranscript = { [weak self] in self?.copyLastDictation() }
+        floatingIndicator.toggleRecording = { [weak self] in self?.toggleRecording() }
+        floatingIndicator.hasLastTranscript = { [weak self] in self?.hasLastDictation ?? false }
         let indicatorModel = floatingIndicator.model
         audioCapture.inputDevice = { [formattingSettings] in formattingSettings.inputDevice }
         audioCapture.onLevels = { levels in
@@ -316,9 +319,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     /// Greys out "Copy Last Dictation" until there's something to copy.
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         if menuItem === copyLastMenuItem {
-            return !transcriptionStore.recentTranscriptions(limit: 1).isEmpty
+            return hasLastDictation
         }
         return true
+    }
+
+    private var hasLastDictation: Bool {
+        !transcriptionStore.recentTranscriptions(limit: 1).isEmpty
     }
 
     // MARK: Shortcuts
@@ -403,6 +410,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         DispatchQueue.main.async { [weak self] in
             if let indicator = self?.floatingIndicator {
                 if recording {
+                    indicator.wake()
+                    indicator.closeMenu()
                     indicator.clearReview()
                     indicator.dismissNotice()
                     indicator.moveToActiveScreen()
