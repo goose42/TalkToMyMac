@@ -118,6 +118,10 @@ extension FloatingIndicatorModel.Phase {
 /// For terminals, where a paste can't be fixed afterwards, the picker instead opens before
 /// pasting, with Paste and Cancel buttons (see `askBeforePaste`).
 ///
+/// Clicking the plain dot (or right-clicking / Control-clicking it at any time) opens the
+/// widget menu: copy the last dictation, start or stop recording, and hide the indicator for
+/// an hour. Hiding ends early when a recording starts (see `wake()`).
+///
 /// It's also where the app tells the user things: `present(_:)` grows the dot into a card
 /// for the notice's duration, with a bar counting down, then shrinks it back. Clicking the
 /// card dismisses it early.
@@ -127,8 +131,16 @@ final class FloatingIndicatorController: NSObject {
     /// Rewrites the pasted text from the first string to the second in the app it went
     /// into. Returns false if it couldn't, which ends the review.
     var rewritePaste: ((String, String) -> Bool)?
+    /// Widget menu actions, supplied by `AppDelegate`.
+    var copyLastTranscript: (() -> Void)?
+    var toggleRecording: (() -> Void)?
+    var hasLastTranscript: (() -> Bool)?
     private let panel: NSPanel
     private let pickerPanel: NSPanel
+    private let menuPanel: NSPanel
+    /// Hidden-for-a-while state, in memory only; relaunching shows the dot again.
+    private var snooze = IndicatorSnooze()
+    private var wakeTask: Task<Void, Never>?
     /// Resumes the paused pipeline with the text to paste, or nil to paste nothing.
     private var pendingPaste: ((String?) -> Void)?
     private var mouseMonitors: [Any] = []
@@ -191,20 +203,9 @@ final class FloatingIndicatorController: NSObject {
             backing: .buffered,
             defer: false
         )
-        pickerPanel = NSPanel(
-            contentRect: .zero,
-            styleMask: [.borderless, .nonactivatingPanel],
-            backing: .buffered,
-            defer: true
-        )
+        pickerPanel = Self.makeOverlayPanel()
+        menuPanel = Self.makeOverlayPanel()
         super.init()
-
-        pickerPanel.isOpaque = false
-        pickerPanel.backgroundColor = .clear
-        pickerPanel.hasShadow = false
-        pickerPanel.level = .screenSaver
-        pickerPanel.hidesOnDeactivate = false
-        pickerPanel.isReleasedWhenClosed = false
 
         panel.isOpaque = false
         panel.backgroundColor = .clear
@@ -219,6 +220,7 @@ final class FloatingIndicatorController: NSObject {
         // Follow the user across Spaces and over full-screen apps.
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
         pickerPanel.collectionBehavior = panel.collectionBehavior
+        menuPanel.collectionBehavior = panel.collectionBehavior
 
         let host = NSHostingView(rootView: FloatingIndicatorView(model: model))
         // The panel's size is fixed; don't let SwiftUI resize it as the capsule animates.
@@ -245,6 +247,24 @@ final class FloatingIndicatorController: NSObject {
         applyVisibility()
     }
 
+    /// A borderless, non-activating overlay that floats above everything, for popups that
+    /// open from the capsule.
+    private static func makeOverlayPanel() -> NSPanel {
+        let panel = NSPanel(
+            contentRect: .zero,
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: true
+        )
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = false
+        panel.level = .screenSaver
+        panel.hidesOnDeactivate = false
+        panel.isReleasedWhenClosed = false
+        return panel
+    }
+
     /// Re-centres on whichever screen the mouse is on, so the indicator appears where the
     /// user is working. Does nothing once the user has dragged it somewhere themselves.
     func moveToActiveScreen() {
@@ -261,7 +281,7 @@ final class FloatingIndicatorController: NSObject {
     /// Shows `notice` in place of the dot until it expires or is clicked away, replacing any
     /// notice already showing. Ignored while the indicator is hidden.
     func showNotice(_ notice: IndicatorNotice) {
-        guard isVisible else { return }
+        guard isShowing else { return }
         model.show(notice)
         updatePicker()
         Task { [weak self] in
@@ -279,7 +299,7 @@ final class FloatingIndicatorController: NSObject {
 
     /// Offers `review` from the indicator. Ignored while the indicator is hidden.
     func showReview(_ review: ReplacementReview) {
-        guard isVisible else { return }
+        guard isShowing else { return }
         model.show(review)
         updatePicker()
     }
@@ -338,8 +358,34 @@ final class FloatingIndicatorController: NSObject {
         return NSScreen.screens.contains { $0.frame.contains(dotCentre) }
     }
 
+    /// Whether the indicator is on screen: enabled in Settings and not hidden for a while.
+    private var isShowing: Bool { isVisible && !snooze.isSnoozed() }
+
+    /// Hides the indicator for `IndicatorSnooze.hideDuration`, or until the next recording.
+    func hideForAnHour() {
+        snooze.snooze(for: IndicatorSnooze.hideDuration)
+        closeMenu()
+        clearReview()
+        dismissNotice()
+        applyVisibility()
+        wakeTask?.cancel()
+        wakeTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(IndicatorSnooze.hideDuration))
+            guard !Task.isCancelled else { return }
+            self?.wake()
+        }
+    }
+
+    /// Brings back an indicator hidden for a while.
+    func wake() {
+        wakeTask?.cancel()
+        wakeTask = nil
+        snooze.wake()
+        applyVisibility()
+    }
+
     private func applyVisibility() {
-        if isVisible {
+        if isShowing {
             panel.orderFrontRegardless()
         } else {
             panel.orderOut(nil)
@@ -369,18 +415,19 @@ final class FloatingIndicatorController: NSObject {
         }) {
             mouseMonitors.append(global)
         }
-        if let local = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .leftMouseDown], handler: { [weak self] event in
+        if let local = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .leftMouseDown, .rightMouseDown], handler: { [weak self] event in
             guard let self else { return event }
+            if event.type == .rightMouseDown, event.window === self.panel {
+                self.handleClick(isSecondary: true)
+                return nil
+            }
             if event.type == .leftMouseDown, event.window === self.panel {
                 // Runs the system window-drag loop until the mouse is released; `panelDidMove`
                 // saves where it lands. A press that didn't move it is a click.
                 let origin = self.panel.frame.origin
                 self.panel.performDrag(with: event)
-                if self.panel.frame.origin == origin, self.model.notice != nil {
-                    self.dismissNotice()
-                } else if self.panel.frame.origin == origin, self.model.review != nil, !self.model.isBeforePaste {
-                    self.model.isPickerOpen.toggle()
-                    self.updatePicker()
+                if self.panel.frame.origin == origin {
+                    self.handleClick(isSecondary: event.modifierFlags.contains(.control))
                 }
                 return nil
             }
@@ -392,10 +439,12 @@ final class FloatingIndicatorController: NSObject {
         // Global monitors only see events bound for other apps, so any of these means the
         // user is working there again. Our own synthesized keystrokes are tagged and skipped.
         if let other = NSEvent.addGlobalMonitorForEvents(matching: [.keyDown, .leftMouseDown, .rightMouseDown], handler: { [weak self] event in
-            // Nothing's been pasted yet while waiting to paste, so there's no cursor to lose.
-            guard let self, self.model.review != nil, self.pendingPaste == nil,
+            guard let self,
                   event.cgEvent?.getIntegerValueField(.eventSourceUserData) != PasteDelivery.syntheticEventTag
             else { return }
+            self.closeMenu()
+            // Nothing's been pasted yet while waiting to paste, so there's no cursor to lose.
+            guard self.model.review != nil, self.pendingPaste == nil else { return }
             self.clearReview()
         }) {
             mouseMonitors.append(other)
@@ -410,6 +459,7 @@ final class FloatingIndicatorController: NSObject {
             pickerPanel.orderOut(nil)
             return
         }
+        closeMenu()
         let host = PickerHostingView(rootView: ReplacementPickerView(
             model: model,
             choose: { [weak self] occurrence, revert in self?.choose(occurrence, revert: revert) },
@@ -418,14 +468,70 @@ final class FloatingIndicatorController: NSObject {
         let size = host.fittingSize
         host.frame = NSRect(origin: .zero, size: size)
         pickerPanel.contentView = host
+        positionAbove(pickerPanel, size: size)
+        pickerPanel.orderFrontRegardless()
+    }
+
+    /// Places `popup` just above the capsule, kept inside the visible screen area.
+    private func positionAbove(_ popup: NSPanel, size: CGSize) {
         let capsuleTop = panel.frame.minY + Self.capsuleBottomPadding + model.capsuleSize.height
         var origin = NSPoint(x: panel.frame.midX - size.width / 2, y: capsuleTop + 6)
         if let visible = (panel.screen ?? NSScreen.main)?.visibleFrame {
             origin.x = min(max(origin.x, visible.minX + 8), visible.maxX - size.width - 8)
             origin.y = min(origin.y, visible.maxY - size.height)
         }
-        pickerPanel.setFrame(NSRect(origin: origin, size: size), display: true)
-        pickerPanel.orderFrontRegardless()
+        popup.setFrame(NSRect(origin: origin, size: size), display: true)
+    }
+
+    // MARK: Widget menu
+
+    private func handleClick(isSecondary: Bool) {
+        if menuPanel.isVisible {
+            closeMenu()
+            return
+        }
+        switch IndicatorClick.action(isSecondary: isSecondary, hasNotice: model.notice != nil,
+                                     hasReview: model.review != nil, isBeforePaste: model.isBeforePaste) {
+        case .openMenu:      openMenu()
+        case .dismissNotice: dismissNotice()
+        case .togglePicker:
+            closeMenu()
+            model.isPickerOpen.toggle()
+            updatePicker()
+        case .none:          break
+        }
+    }
+
+    private func openMenu() {
+        if model.isPickerOpen {
+            model.isPickerOpen = false
+            updatePicker()
+        }
+        let items = WidgetMenu.items(isRecording: model.phase == .recording,
+                                     hasLastTranscript: hasLastTranscript?() ?? false)
+        let host = PickerHostingView(rootView: WidgetMenuView(items: items) { [weak self] action in
+            self?.perform(action)
+        })
+        let size = host.fittingSize
+        host.frame = NSRect(origin: .zero, size: size)
+        menuPanel.contentView = host
+        menuPanel.setAccessibilityRole(.menu)
+        positionAbove(menuPanel, size: size)
+        menuPanel.orderFrontRegardless()
+    }
+
+    func closeMenu() {
+        guard menuPanel.isVisible else { return }
+        menuPanel.orderOut(nil)
+    }
+
+    private func perform(_ action: WidgetMenuAction) {
+        closeMenu()
+        switch action {
+        case .copyLastTranscript: copyLastTranscript?()
+        case .toggleRecording:    toggleRecording?()
+        case .hideForAnHour:      hideForAnHour()
+        }
     }
 
     private func choose(_ occurrence: Int, revert: Bool) {
@@ -447,6 +553,7 @@ final class FloatingIndicatorController: NSObject {
 
     @objc private func panelDidMove() {
         if pickerPanel.isVisible { updatePicker() }
+        if menuPanel.isVisible { openMenu() }
         guard !isPlacingProgrammatically else { return }
         savedOrigin = panel.frame.origin
     }
@@ -664,6 +771,46 @@ private struct ReplacementPickerView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// The widget menu's rows: icon and title, white on black like the capsule, with a hover
+/// highlight. Disabled rows are dimmed and ignore clicks.
+private struct WidgetMenuView: View {
+    let items: [WidgetMenuItem]
+    let choose: (WidgetMenuAction) -> Void
+    @State private var hovered: WidgetMenuAction?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            ForEach(items, id: \.action) { item in
+                Button { choose(item.action) } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: item.symbol)
+                            .font(.system(size: 12))
+                            .frame(width: 16)
+                        Text(item.title)
+                        Spacer(minLength: 0)
+                    }
+                    .font(.system(size: 13))
+                    .foregroundStyle(.white.opacity(item.isEnabled ? 1 : 0.4))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(.white.opacity(item.isEnabled && hovered == item.action ? 0.15 : 0)))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(!item.isEnabled)
+                .onHover { inside in hovered = inside ? item.action : nil }
+                .accessibilityLabel(item.title)
+            }
+        }
+        .padding(6)
+        .frame(minWidth: 190, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 10).fill(.black.opacity(0.72)))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(.white.opacity(0.4), lineWidth: 1))
+        .fixedSize()
     }
 }
 
