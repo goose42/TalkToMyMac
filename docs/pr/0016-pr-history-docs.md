@@ -1,6 +1,6 @@
 # #0016 — Document every PR in docs/pr
 
-- Branch: `jv.pr-history-docs` · Merged: pending · Commits: see PR
+- Branch: `jv.pr-history-docs` · Merged: pending · Commits: `2642848`
 
 ## Why
 Give agents a readable trace of the repo's history: why each change was made, not just what the diff shows.
