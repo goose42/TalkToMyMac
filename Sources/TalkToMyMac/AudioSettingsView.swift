@@ -12,6 +12,19 @@ struct AudioSettingsView: View {
     var body: some View {
         Form {
             Section {
+                Toggle("Built-in microphone only", isOn: $settings.builtInMicrophoneOnly)
+            } header: {
+                Text("Troubleshooting")
+            } footer: {
+                Text("Records only from this Mac's own microphone and stops all monitoring of other "
+                     + "audio devices, including Bluetooth: no device-change listener, no device "
+                     + "scans, and no muting or dampening of output while you dictate. Try it if "
+                     + "dictation drops words or feels laggy with headphones connected.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
                 Picker("Record from", selection: $settings.inputDevice) {
                     Text(systemDefaultMicrophoneTitle).tag(InputDeviceSelection.systemDefault)
                     Divider()
@@ -19,6 +32,7 @@ struct AudioSettingsView: View {
                         Text(microphoneTitle(device)).tag(InputDeviceSelection.device(uid: device.uid))
                     }
                 }
+                .disabled(settings.builtInMicrophoneOnly)
             } header: {
                 Text("Microphone")
             } footer: {
@@ -35,6 +49,7 @@ struct AudioSettingsView: View {
                         Text(action.title).tag(action)
                     }
                 }
+                .disabled(settings.builtInMicrophoneOnly)
                 if settings.systemAudioAction == .dampen {
                     LabeledContent("Lower to \(Int((settings.systemAudioDampenLevel * 100).rounded()))% of current volume") {
                         Slider(value: $settings.systemAudioDampenLevel, in: 0.05...0.8, step: 0.05)
@@ -80,8 +95,11 @@ struct AudioSettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .onAppear { devices.start() }
+        .onAppear { if !settings.builtInMicrophoneOnly { devices.start() } }
         .onDisappear { devices.stop() }
+        .onChange(of: settings.builtInMicrophoneOnly) { _, builtInOnly in
+            if builtInOnly { devices.stop() } else { devices.start() }
+        }
         .onChange(of: devices.outputs) { _, connected in
             for device in connected where settings.systemAudioDeviceNames[device.uid] != device.name {
                 settings.systemAudioDeviceNames[device.uid] = device.name

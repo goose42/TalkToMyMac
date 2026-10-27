@@ -1,4 +1,5 @@
 import CoreAudio
+import TalkToMyMacCore
 
 /// CoreAudio queries for the Mac's audio devices, shared by `SystemAudioMuter` (output),
 /// `AudioCapture` (input) and the Audio settings tab.
@@ -29,6 +30,17 @@ enum AudioDevices {
             return Device(uid: uid, name: string(device, kAudioObjectPropertyName) ?? uid)
         }
     }
+
+    /// UIDs of the input devices, read from CoreAudio once and kept until `AudioDeviceWatcher`
+    /// sees the device list change. Starting a recording used to re-read every device on the
+    /// main thread, which stalls while a Bluetooth device is changing profile.
+    static let cachedInputUIDs = InvalidatingCache<[String]> { list(.input).map(\.uid) }
+
+    /// UID of the Mac's own microphone, if it has one. Looked up once: it never changes, and
+    /// looking it up is the only device scan built-in-only mode does.
+    static let builtInInputUID: String? = allDeviceIDs().first { device in
+        hasStreams(device, .input) && transportType(device) == kAudioDeviceTransportTypeBuiltIn
+    }.flatMap(uid(of:))
 
     /// The device the Mac currently records from or plays through.
     static func defaultDevice(_ direction: Direction) -> AudioDeviceID? {
@@ -74,6 +86,12 @@ enum AudioDevices {
         return ids
     }
 
+    private static func transportType(_ device: AudioDeviceID) -> UInt32? {
+        read(UInt32.self, device, AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyTransportType,
+                                                             mScope: kAudioObjectPropertyScopeGlobal,
+                                                             mElement: kAudioObjectPropertyElementMain))
+    }
+
     private static func hasStreams(_ device: AudioDeviceID, _ direction: Direction) -> Bool {
         var address = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyStreams,
                                                  mScope: direction.streamScope,
@@ -88,5 +106,44 @@ enum AudioDevices {
                                                  mElement: kAudioObjectPropertyElementMain)
         // CoreAudio hands back a +1 reference for CFString properties.
         return read(Unmanaged<CFString>.self, object, address)?.takeRetainedValue() as String?
+    }
+}
+
+/// Keeps `cachedInputUIDs` fresh by listening for CoreAudio device and default-device changes
+/// (a headset connecting, switching profile or leaving). Callbacks run on a private queue.
+final class AudioDeviceWatcher: @unchecked Sendable {
+    static let shared = AudioDeviceWatcher()
+
+    private let queue = DispatchQueue(label: "com.talktomymac.audio-device-watcher")
+    private var listener: AudioObjectPropertyListenerBlock?
+
+    private static let watched: [AudioObjectPropertySelector] = [
+        kAudioHardwarePropertyDevices, kAudioHardwarePropertyDefaultInputDevice,
+        kAudioHardwarePropertyDefaultOutputDevice,
+    ]
+
+    /// Starts listening.
+    func start() {
+        guard listener == nil else { return }
+        let block: AudioObjectPropertyListenerBlock = { _, _ in
+            AudioDevices.cachedInputUIDs.invalidate()
+        }
+        for selector in Self.watched {
+            var address = AudioObjectPropertyAddress(mSelector: selector, mScope: kAudioObjectPropertyScopeGlobal,
+                                                     mElement: kAudioObjectPropertyElementMain)
+            AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &address, queue, block)
+        }
+        listener = block
+    }
+
+    /// Stops listening; the system then gets no callbacks from us at all.
+    func stop() {
+        guard let listener else { return }
+        for selector in Self.watched {
+            var address = AudioObjectPropertyAddress(mSelector: selector, mScope: kAudioObjectPropertyScopeGlobal,
+                                                     mElement: kAudioObjectPropertyElementMain)
+            AudioObjectRemovePropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &address, queue, listener)
+        }
+        self.listener = nil
     }
 }

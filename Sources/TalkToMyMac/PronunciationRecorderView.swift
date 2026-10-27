@@ -22,7 +22,7 @@ struct PronunciationRecorderView: View {
     }
 
     @State private var step = Step.word
-    @State private var capture = AudioCapture()
+    @State private var capture = AudioCapture(queue: AudioWorkQueue(label: "com.talktomymac.audio.pronunciation"))
     @State private var isRecording = false
     @State private var level: Float = 0
     @State private var wordTake: PronunciationProbe.Take?
@@ -45,7 +45,7 @@ struct PronunciationRecorderView: View {
                     EmptyView()
                 case .word, .sentence:
                     Button("Cancel", role: .cancel) {
-                        stopCapture()
+                        Task { await stopCapture() }
                         dismiss()
                     }
                     .keyboardShortcut(.cancelAction)
@@ -54,7 +54,7 @@ struct PronunciationRecorderView: View {
         }
         .padding(20)
         .frame(width: 420)
-        .onDisappear { stopCapture() }
+        .onDisappear { Task { await stopCapture() } }
     }
 
     @ViewBuilder
@@ -110,6 +110,7 @@ struct PronunciationRecorderView: View {
 
     private func startCapture() {
         capture.inputDevice = { [settings] in settings.inputDevice }
+        capture.builtInOnly = { [settings] in settings.builtInMicrophoneOnly }
         capture.onLevels = { levels in
             guard let latest = levels.last else { return }
             DispatchQueue.main.async { level = latest }
@@ -125,28 +126,30 @@ struct PronunciationRecorderView: View {
     /// Stops the current take and moves on: to the sentence after the word, to analysis
     /// after the sentence.
     private func finishTake() {
-        guard let take = stopCapture() else {
-            step = .failed("Nothing was recorded. Check microphone access in System Settings.")
-            return
-        }
-        if step == .word {
-            wordTake = take
-            step = .sentence
-        } else if let wordTake {
-            analyze(word: wordTake, sentence: take)
+        Task {
+            guard let take = await stopCapture() else {
+                step = .failed("Nothing was recorded. Check microphone access in System Settings.")
+                return
+            }
+            if step == .word {
+                wordTake = take
+                step = .sentence
+            } else if let wordTake {
+                analyze(word: wordTake, sentence: take)
+            }
         }
     }
 
     /// Stops recording if it's running and returns what was captured. Practice clips are
     /// deleted at once so they don't pile up with the dictation recordings.
     @discardableResult
-    private func stopCapture() -> PronunciationProbe.Take? {
+    private func stopCapture() async -> PronunciationProbe.Take? {
         guard isRecording else { return nil }
         isRecording = false
         try? capture.stop()
         defer { capture.discardLastRecording() }
-        guard let samples = capture.lastRecordingRawSamples, !samples.isEmpty else { return nil }
-        return PronunciationProbe.Take(samples: samples, sampleRate: capture.lastRecordingSampleRate)
+        guard let (samples, sampleRate) = await capture.finishedRecording(), !samples.isEmpty else { return nil }
+        return PronunciationProbe.Take(samples: samples, sampleRate: sampleRate)
     }
 
     // MARK: Analysis

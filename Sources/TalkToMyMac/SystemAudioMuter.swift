@@ -13,9 +13,12 @@ import TalkToMyMacCore
 /// Devices without a mute control (some HDMI/USB outputs) are turned down to zero volume
 /// instead, and devices without a volume control are muted rather than dampened.
 ///
-/// `@unchecked Sendable`: held by the non-isolated `RecorderController`, which calls it
-/// synchronously from the main thread when recordings start and stop; the pending-restore
-/// state is only touched from there.
+/// Reading and writing a Bluetooth output's volume goes over the air and can be slow, and
+/// these methods are called from the Fn-key event tap on the main thread. So the CoreAudio
+/// work runs on the shared audio queue, in order with the recorder's start and stop.
+///
+/// `@unchecked Sendable`: held by the non-isolated `RecorderController`; the pending-restore
+/// state is only touched on `queue`.
 final class SystemAudioMuter: SystemAudioMuting, @unchecked Sendable {
     /// What `muteForRecording()` changed and must undo.
     private enum Change {
@@ -24,18 +27,27 @@ final class SystemAudioMuter: SystemAudioMuting, @unchecked Sendable {
     }
 
     private let settings: FormattingSettings
+    private let queue: AudioWorkQueue
     private var pending: Change?
     private let logger = Logger(subsystem: "com.talktomymac.dictate", category: "SystemAudioMuter")
 
-    init(settings: FormattingSettings) {
+    init(settings: FormattingSettings, queue: AudioWorkQueue) {
         self.settings = settings
+        self.queue = queue
     }
 
     func muteForRecording() {
+        // The setting is read here, on the caller's thread; everything else is CoreAudio.
+        guard !settings.builtInMicrophoneOnly else { return }
+        let policy = settings.systemAudioPolicy
+        queue.async { [self] in mute(policy: policy) }
+    }
+
+    private func mute(policy: SystemAudioPolicy) {
         guard pending == nil, let device = AudioDevices.defaultDevice(.output),
               let uid = AudioDevices.uid(of: device) else { return }
 
-        switch settings.systemAudioPolicy.plan(forDeviceUID: uid) {
+        switch policy.plan(forDeviceUID: uid) {
         case .leaveAlone:
             return
         case .mute:
@@ -79,6 +91,15 @@ final class SystemAudioMuter: SystemAudioMuting, @unchecked Sendable {
     }
 
     func restoreAfterRecording() {
+        queue.async { [self] in restore() }
+    }
+
+    /// Restores and waits, for quitting mid-recording: the process may exit before the queue runs.
+    func restoreAfterRecordingBlocking() {
+        queue.sync { restore() }
+    }
+
+    private func restore() {
         guard let change = pending else { return }
         pending = nil
         switch change {

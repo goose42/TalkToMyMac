@@ -24,6 +24,7 @@ final class FormattingSettings: @unchecked Sendable {
         static let systemAudioDeviceNames = "systemAudioDeviceNames"
         static let inputDeviceUID = "inputDeviceUID"
         static let inputDeviceNames = "inputDeviceNames"
+        static let builtInMicrophoneOnly = "builtInMicrophoneOnly"
         /// On/off toggle from before the Audio tab; migrated into `systemAudioAction` on launch.
         static let legacyMuteSystemAudioWhileRecording = "muteSystemAudioWhileRecording"
         static let skipShortDictations = "skipShortDictations"
@@ -194,6 +195,19 @@ final class FormattingSettings: @unchecked Sendable {
         didSet { UserDefaults.standard.set(inputDevice.persistedUID, forKey: Keys.inputDeviceUID) }
     }
 
+    /// Records only from the Mac's built-in microphone and switches off everything that watches
+    /// or touches other audio devices (device-change listener, device list reads, muting the
+    /// output). For when a Bluetooth headset makes dictation laggy or drops words.
+    var builtInMicrophoneOnly: Bool {
+        didSet {
+            UserDefaults.standard.set(builtInMicrophoneOnly, forKey: Keys.builtInMicrophoneOnly)
+            onBuiltInMicrophoneOnlyChange?()
+        }
+    }
+
+    /// Called after `builtInMicrophoneOnly` changes, so the audio stack can start or stop watching.
+    @ObservationIgnored var onBuiltInMicrophoneOnlyChange: (() -> Void)?
+
     /// Last-seen names of input devices by UID, so a chosen microphone that isn't connected
     /// right now still shows by name in Settings.
     var inputDeviceNames: [String: String] {
@@ -242,6 +256,7 @@ final class FormattingSettings: @unchecked Sendable {
         systemAudioDeviceNames = defaults.dictionary(forKey: Keys.systemAudioDeviceNames) as? [String: String] ?? [:]
         inputDevice = InputDeviceSelection(persistedUID: defaults.string(forKey: Keys.inputDeviceUID))
         inputDeviceNames = defaults.dictionary(forKey: Keys.inputDeviceNames) as? [String: String] ?? [:]
+        builtInMicrophoneOnly = defaults.bool(forKey: Keys.builtInMicrophoneOnly)
         skipShortDictations = defaults.object(forKey: Keys.skipShortDictations) as? Bool ?? false
         formattingWordThreshold = defaults.object(forKey: Keys.formattingWordThreshold) as? Int ?? 3
         provider = defaults.string(forKey: Keys.formattingProvider).flatMap(FormattingProvider.init) ?? .default

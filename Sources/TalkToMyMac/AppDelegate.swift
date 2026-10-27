@@ -23,7 +23,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
     // -- Core --
     private var controller: RecorderController!
-    private let audioCapture = AudioCapture()
+    /// Runs CoreAudio work (opening the mic, muting output) off the main thread; see `AudioCapture`.
+    private let audioQueue = AudioWorkQueue(label: "com.talktomymac.audio")
+    private lazy var audioCapture = AudioCapture(queue: audioQueue)
     private let speechService = SpeechTranscriptionService()
     private let parakeetService = ParakeetTranscriptionService()
     private let formattingSettings = FormattingSettings()
@@ -85,7 +87,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             floatingIndicator: floatingIndicator
         )
 
-        systemAudioMuter = SystemAudioMuter(settings: formattingSettings)
+        systemAudioMuter = SystemAudioMuter(settings: formattingSettings, queue: audioQueue)
 
         // Build the RecorderController: mic → Apple Speech or Parakeet (both on-device) →
         // optional deterministic cleanup → (terminals: pick replacements) → Foundation Models
@@ -125,6 +127,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         }
         shortcuts.start()
 
+        // A failed start is reported after `start()` has returned, so unwind the recording here.
+        audioCapture.onStartFailure = { [weak self] _ in
+            DispatchQueue.main.async { MainActor.assumeIsolated { self?.handleShortcut(.cancel) } }
+        }
+        audioCapture.builtInOnly = { [formattingSettings] in formattingSettings.builtInMicrophoneOnly }
+        applyAudioWatching()
+        formattingSettings.onBuiltInMicrophoneOnlyChange = { [weak self] in
+            MainActor.assumeIsolated { self?.applyAudioWatching() }
+        }
+
         // Surface a skipped paste instead of failing silently — the user has no other way
         // to tell the difference between "permission missing" and "the app is broken".
         // `PasteDelivery.skip` already hops to the main queue before invoking this.
@@ -159,7 +171,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     func applicationWillTerminate(_ notification: Notification) {
         accessibilityWatchTimer?.invalidate()
         // Quitting mid-recording mustn't leave the Mac silent.
-        systemAudioMuter?.restoreAfterRecording()
+        systemAudioMuter?.restoreAfterRecordingBlocking()
     }
 
     // MARK: Permissions (requested up front, not on first use)
@@ -358,6 +370,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         }
     }
 
+    /// Keeps the cached input-device list fresh by watching for device changes (Bluetooth
+    /// connecting or switching profile), unless built-in-microphone-only mode is on, which
+    /// leaves other audio devices alone entirely.
+    private func applyAudioWatching() {
+        if formattingSettings.builtInMicrophoneOnly {
+            AudioDeviceWatcher.shared.stop()
+        } else {
+            AudioDevices.cachedInputUIDs.invalidate() // may be stale after time spent unwatched
+            AudioDeviceWatcher.shared.start()
+        }
+    }
+
     private func recordingEnded() {
         toggleMenuItem.title = "Start Recording"
         shortcuts.setEscapeActive(false)
@@ -366,16 +390,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     // MARK: Post-recording pipeline
 
     private func processLastRecording() {
-        guard let rawSamples = audioCapture.lastRecordingRawSamples else {
-            print("[Pipeline] No in-memory samples available")
-            return
-        }
-        let sampleRate = audioCapture.lastRecordingSampleRate
-        let duration = Double(rawSamples.count) / sampleRate
-        print("[Pipeline] Raw capture: \(rawSamples.count) samples, sampleRate=\(sampleRate), duration=\(String(format: "%.2f", duration))s")
-
         Task { [weak self] in
-            guard let self else { return }
+            // Stopping the mic happens off the main thread; wait for it to finish.
+            guard let self, let (rawSamples, sampleRate) = await self.audioCapture.finishedRecording() else {
+                print("[Pipeline] No in-memory samples available")
+                return
+            }
+            let duration = Double(rawSamples.count) / sampleRate
+            print("[Pipeline] Raw capture: \(rawSamples.count) samples, sampleRate=\(sampleRate), duration=\(String(format: "%.2f", duration))s")
+
             if let result = await self.controller.processRecording(samples: rawSamples, sampleRate: sampleRate) {
                 print("[Pipeline] Transcript: \(result.finalText)")
                 self.transcriptionStore.insert(result, audioSeconds: duration)
