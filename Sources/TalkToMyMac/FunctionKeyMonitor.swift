@@ -87,6 +87,12 @@ final class FunctionKeyMonitor {
         case .tapDisabledByTimeout, .tapDisabledByUserInput:
             // The system disables a tap that's slow or when secure input starts; re-arm it.
             if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
+            // Events were dropped while the tap was off; if Fn was let go in that gap, the
+            // release never arrived and a hold recording would run on until the next press.
+            if fnDown, !CGEventSource.flagsState(.combinedSessionState).contains(.maskSecondaryFn) {
+                logger.notice("Event tap was disabled while Fn was held; treating Fn as released")
+                handleFunctionKey(isDown: false)
+            }
             return true
 
         case .flagsChanged:
