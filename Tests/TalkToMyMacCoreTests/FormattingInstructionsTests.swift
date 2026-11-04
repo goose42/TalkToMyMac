@@ -15,4 +15,12 @@ final class FormattingInstructionsTests: XCTestCase {
         XCTAssertTrue(FormattingInstructions.userPrompt(transcript: "hi")
             .hasPrefix(FormattingInstructions.userPromptPrefix))
     }
+
+    // MARK: Generation settings
+
+    // Shared by the on-device formatter and the evals so they can't drift apart.
+    func testGenerationSettingsMatchTheAppsFormatter() {
+        XCTAssertEqual(FormattingInstructions.temperature, 0.2)
+        XCTAssertEqual(FormattingInstructions.maximumResponseTokens, 2048)
+    }
 }
