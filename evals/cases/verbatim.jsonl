@@ -1,0 +1,2 @@
+{"id": "keep-every-word", "input": "so basically I think we should ship it on Friday", "expected": "So basically I think we should ship it on Friday.", "notes": "verbatim keeps 'so basically'", "cleanup": false}
+{"id": "question", "input": "can you send me the link", "expected": "Can you send me the link?"}

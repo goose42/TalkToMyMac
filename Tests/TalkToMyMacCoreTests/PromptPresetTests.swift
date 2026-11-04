@@ -1,4 +1,5 @@
 import XCTest
+import CryptoKit
 @testable import TalkToMyMacCore
 
 final class PromptPresetTests: XCTestCase {
@@ -74,5 +75,47 @@ final class PromptPresetTests: XCTestCase {
     func testCustomIsEditedOnceItHasText() {
         XCTAssertFalse(PromptPreset.custom.isEdited(""))
         XCTAssertTrue(PromptPreset.custom.isEdited("Write in French."))
+    }
+
+    // MARK: Markdown prompts
+
+    /// Built-in prompts are compiled from `Prompts/*.md`. Pinning their hashes guards
+    /// `isEdited`: any byte change would flag every user's saved prompt as edited.
+    /// Change a hash here only when you mean to change the prompt.
+    func testCompiledPromptsMatchPinnedText() throws {
+        let pinned: [(String, String)] = [
+            (try XCTUnwrap(PromptPreset.coding.instructions), "39bcb6198805bf106ad0855c6b5f1cc45264ed29c0be40044f01f7e698346f79"),
+            (try XCTUnwrap(PromptPreset.cleanUp.instructions), "a8fbbd47d1d5ad96f73b5d4045109c7f0cb301e260adc497a31d45df6b66a022"),
+            (try XCTUnwrap(PromptPreset.verbatim.instructions), "c11860473bf90cc305ec9acdbfdd62ce1fbd4b7755a8016bf7ae1ba695689041"),
+            (try XCTUnwrap(PromptPreset.email.instructions), "7b096fdb9496f8634ab5c38b0f3da4778216e8acc0e7af34315301550327c36c"),
+            (try XCTUnwrap(PromptPreset.codeComment.instructions), "c470b745da9b037664ed67f86e41837aa4651249f23a908c8aa70ff32142eee9"),
+            (DictionaryEntryPrompt.instructions, "6156351ffd2837147e34daf1c39dd895247a1c7bee7aa4e0ea680e5a6a9fb936"),
+        ]
+        for (index, (text, hash)) in pinned.enumerated() {
+            let actual = SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined()
+            XCTAssertEqual(actual, hash, "prompt #\(index) changed")
+        }
+    }
+
+    func testPresetsReadFromThePromptLibrary() {
+        XCTAssertEqual(PromptPreset.coding.instructions, PromptLibrary.coding)
+        XCTAssertEqual(PromptPreset.cleanUp.instructions, PromptLibrary.cleanUp)
+        XCTAssertEqual(PromptPreset.verbatim.instructions, PromptLibrary.verbatim)
+        XCTAssertEqual(PromptPreset.email.instructions, PromptLibrary.email)
+        XCTAssertEqual(PromptPreset.codeComment.instructions, PromptLibrary.codeComment)
+        XCTAssertEqual(DictionaryEntryPrompt.instructions, PromptLibrary.dictionaryEntry)
+    }
+
+    func testPromptLibraryLooksUpByFileName() {
+        XCTAssertEqual(PromptLibrary.all["clean-up"], PromptLibrary.cleanUp)
+        XCTAssertEqual(PromptLibrary.all.count, 6)
+    }
+
+    func testPresetFileNameMatchesItsMarkdownFile() {
+        XCTAssertEqual(PromptPreset.cleanUp.fileName, "clean-up")
+        XCTAssertNil(PromptPreset.custom.fileName)
+        for preset in PromptPreset.allCases where preset != .custom {
+            XCTAssertEqual(PromptLibrary.all[preset.fileName!], preset.instructions)
+        }
     }
 }

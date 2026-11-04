@@ -84,7 +84,8 @@ final class FoundationModelFormatter: TextFormatting, @unchecked Sendable {
         let session = warmed.flatMap { $0.instructions == instructions ? $0.session : nil }
             ?? LanguageModelSession(model: model, instructions: instructions)
         let prompt = FormattingInstructions.userPrompt(transcript: raw)
-        let options = GenerationOptions(temperature: 0.2, maximumResponseTokens: 2048)
+        let options = GenerationOptions(temperature: FormattingInstructions.temperature,
+                                        maximumResponseTokens: FormattingInstructions.maximumResponseTokens)
 
         guard let content = await respondWithTimeout(session: session, prompt: prompt, options: options) else {
             return nil

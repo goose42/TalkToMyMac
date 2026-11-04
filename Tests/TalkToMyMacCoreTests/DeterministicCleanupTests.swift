@@ -86,4 +86,29 @@ final class DeterministicCleanupTests: XCTestCase {
     func testRunsWhenTheLanguageCantBeDetected() {
         XCTAssertTrue(DeterministicCleanup.runs(on: "uh, um", language: nil))
     }
+
+    // MARK: clean(_:dictionary:fullCleanup:language:), the pipeline's cleaning step
+
+    func testCleanRunsFullCleanupWhenOnAndEnglish() {
+        let dictionary = [DictionaryEntry(written: "OTel", type: .acronym, soundsLike: ["hotel"])]
+        XCTAssertEqual(DeterministicCleanup.clean("uh add hotel tracing", dictionary: dictionary,
+                                                  fullCleanup: true, language: nil),
+                       "Add OTel tracing")
+    }
+
+    func testCleanOnlyAppliesTheDictionaryWhenCleanupIsOff() {
+        let dictionary = [DictionaryEntry(written: "OTel", type: .acronym, soundsLike: ["hotel"])]
+        XCTAssertEqual(DeterministicCleanup.clean("uh add hotel tracing", dictionary: dictionary,
+                                                  fullCleanup: false, language: nil),
+                       "uh add OTel tracing")
+    }
+
+    func testCleanOnlyAppliesTheDictionaryForAnotherChosenLanguage() {
+        XCTAssertNil(DeterministicCleanup.clean("um hello there", dictionary: [], fullCleanup: true, language: "de"))
+    }
+
+    /// Nil means "nothing changed", so the pipeline keeps the raw text.
+    func testCleanIsNilWhenTheDictionaryChangesNothing() {
+        XCTAssertNil(DeterministicCleanup.clean("uh add tracing", dictionary: [], fullCleanup: false, language: nil))
+    }
 }

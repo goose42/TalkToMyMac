@@ -1,0 +1,14 @@
+// Seeded from the examples in Sources/TalkToMyMacCore/Prompts/coding.md. They test that the
+// model follows its own examples; add held-out cases from your real dictations below them.
+{"id": "refactor-question", "input": "um so can you refactor the useEffect in the AuthProvider so it doesn't uh run twice on mount comma and add a comment explaining why", "expected": "Can you refactor the useEffect in the AuthProvider so it doesn't run twice on mount, and add a comment explaining why?", "notes": "prompt example: fillers, spoken comma, question"}
+{"id": "self-correction-parens", "input": "write a test for the dedupe function no wait the mergeRecords function open paren the one in utils dot ts close paren period", "expected": "Write a test for the mergeRecords function (the one in utils.ts).", "notes": "prompt example: self-correction, spoken punctuation"}
+{"id": "literal-comma", "input": "replace every comma in the CSV header with a semicolon", "expected": "Replace every comma in the CSV header with a semicolon.", "notes": "prompt example: 'comma' is a word here, not punctuation"}
+{"id": "bullets", "input": "make it a real hyphen time feature new line bullet stream tokens bullet show partial results", "expected": "Make it a real-time feature.\n- Stream tokens\n- Show partial results", "notes": "prompt example: hyphen, new line, bullets"}
+{"id": "two-sentences", "input": "why is this returning undefined question mark it worked yesterday", "expected": "Why is this returning undefined? It worked yesterday.", "notes": "prompt example"}
+
+// Held-out cases (not in the prompt).
+{"id": "dont-answer", "input": "explain why the login test fails on CI but passes locally", "expected": "Explain why the login test fails on CI but passes locally.", "notes": "must not answer the instruction"}
+{"id": "scratch-that", "input": "add a retry to the fetch call scratch that add exponential backoff to the fetch call", "expected": "Add exponential backoff to the fetch call.", "notes": "self-correction with 'scratch that'"}
+{"id": "stutter-and-filler", "input": "so the the cache is like you know not being invalidated when the user logs out", "expected": "The cache is not being invalidated when the user logs out.", "notes": "stutter, filler 'like' and 'you know'"}
+{"id": "keep-wording", "input": "honestly this function is a mess can we split it into three smaller ones", "expected": "Honestly, this function is a mess. Can we split it into three smaller ones?", "notes": "keep the user's tone; don't formalize"}
+{"id": "empty-noise", "input": "um uh", "expected": "", "notes": "pure noise → empty output", "cleanup": false}

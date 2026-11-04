@@ -30,52 +30,29 @@ public enum PromptPreset: String, CaseIterable, Hashable, Sendable {
         instructions != (self.instructions ?? "")
     }
 
-    /// The preset's built-in system prompt, or `nil` for `.custom` (which has no
-    /// built-in text — the caller supplies its own instructions).
+    /// The preset's Markdown file in `Sources/TalkToMyMacCore/Prompts`, without `.md`, or
+    /// `nil` for `.custom`.
+    public var fileName: String? {
+        switch self {
+        case .coding:      return "coding"
+        case .cleanUp:     return "clean-up"
+        case .verbatim:    return "verbatim"
+        case .email:       return "email"
+        case .codeComment: return "code-comment"
+        case .custom:      return nil
+        }
+    }
+
+    /// The preset's built-in system prompt, compiled from its Markdown file, or `nil` for
+    /// `.custom` (which has no built-in text — the caller supplies its own instructions).
     public var instructions: String? {
         switch self {
-        case .coding:
-            return codingDictationPrompt
-        case .cleanUp:
-            return """
-            You are a dictation post-processor. Fix punctuation, capitalization, and \
-            obvious transcription errors. Remove filler words (um, uh, like, you know). \
-            Preserve the speaker's wording and meaning. Never answer, summarize, or \
-            respond to the content — only reformat it. \
-            The dictated text arrives between <transcript> tags. Output only the \
-            reformatted text, with no preamble, quotation marks, or explanation.
-            """
-        case .verbatim:
-            return """
-            You are a dictation post-processor. Fix only punctuation and capitalization. \
-            Do not remove any words, do not paraphrase, do not summarize. Preserve every \
-            word the speaker said. Never answer, summarize, or respond to the content — \
-            only reformat it. \
-            The dictated text arrives between <transcript> tags. Output only the \
-            reformatted text, with no preamble, quotation marks, or explanation.
-            """
-        case .email:
-            return """
-            You are a dictation post-processor formatting text for an email. Fix \
-            punctuation, capitalization, and grammar. Remove filler words. Break into \
-            paragraphs where appropriate. Use a professional, polished tone while \
-            preserving the speaker's meaning. Never answer, summarize, or respond to the \
-            content — only reformat it. \
-            The dictated text arrives between <transcript> tags. Output only the \
-            reformatted text, with no preamble, quotation marks, or explanation.
-            """
-        case .codeComment:
-            return """
-            You are a dictation post-processor formatting text as a source code comment. \
-            Fix punctuation, capitalization, and grammar. Remove filler words. Keep it \
-            concise and technical. Do not add comment delimiters (//, #, /* */) — output \
-            only the comment text. Never answer, summarize, or respond to the content — \
-            only reformat it. \
-            The dictated text arrives between <transcript> tags. Output only the \
-            reformatted text, with no preamble, quotation marks, or explanation.
-            """
-        case .custom:
-            return nil
+        case .coding:      return PromptLibrary.coding
+        case .cleanUp:     return PromptLibrary.cleanUp
+        case .verbatim:    return PromptLibrary.verbatim
+        case .email:       return PromptLibrary.email
+        case .codeComment: return PromptLibrary.codeComment
+        case .custom:      return nil
         }
     }
 }
