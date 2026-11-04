@@ -1,4 +1,4 @@
-.PHONY: all build clean run test setup-signing install uninstall check-deps
+.PHONY: all build clean run test eval eval-test setup-signing install uninstall check-deps
 
 APP_NAME = TalkToMyMac
 APP_BUNDLE = build/$(APP_NAME).app
@@ -102,6 +102,16 @@ run: check-deps
 
 test:
 	swift test
+
+# Prompt evals (standalone package in evals/, not part of the app). Runs a prompt over
+# evals/cases/$(SUITE).jsonl with the on-device model and your dictionary. Extra flags go in
+# ARGS, e.g. `make eval SUITE=coding ARGS="--judge --prompt draft.md"`. See evals/README.md.
+SUITE ?= coding
+eval:
+	swift run --package-path evals ttm-eval evals/cases/$(SUITE).jsonl $(ARGS)
+
+eval-test:
+	swift test --package-path evals
 
 clean:
 	rm -rf build/

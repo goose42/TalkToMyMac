@@ -14,12 +14,8 @@ final class CleanupRouter: TextCleaning, @unchecked Sendable {
     }
 
     func clean(_ text: String) -> String? {
-        let dictionary = settings.dictionaryEntries
-        if settings.deterministicCleanupEnabled, DeterministicCleanup.runs(on: text, language: language) {
-            return DeterministicCleanup.apply(text, dictionary: dictionary)
-        }
-        let replaced = DeterministicCleanup.applyDictionary(text, dictionary: dictionary)
-        return replaced == text ? nil : replaced
+        DeterministicCleanup.clean(text, dictionary: settings.dictionaryEntries,
+                                   fullCleanup: settings.deterministicCleanupEnabled, language: language)
     }
 
     /// The language the user chose for Parakeet, when Parakeet is the selected engine.

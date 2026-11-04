@@ -90,6 +90,20 @@ make run     # builds and launches it
 make test    # runs the TalkToMyMacCore unit tests
 ```
 
+## Prompts and evals
+
+The built-in formatting prompts are Markdown files in `Sources/TalkToMyMacCore/Prompts`, compiled
+into the app at build time. To measure a prompt change before shipping it, run the eval harness in
+`evals/`. It runs a prompt over example transcripts with your dictionary and the on-device model,
+then scores the outputs against the text you wanted:
+
+```sh
+make eval SUITE=coding                               # the built-in coding prompt
+make eval SUITE=coding ARGS="--prompt draft.md --judge"   # a draft, with a model judge
+```
+
+See `evals/README.md` for the case format and options.
+
 ## Settings
 
 Open Settings from the menu bar item (⌘,) to:

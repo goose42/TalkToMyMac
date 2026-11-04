@@ -1,0 +1,3 @@
+{"id": "fillers", "input": "um so I think we should uh move the meeting to Thursday", "expected": "I think we should move the meeting to Thursday."}
+{"id": "dont-answer", "input": "what time is the standup tomorrow", "expected": "What time is the standup tomorrow?", "notes": "a question to reformat, not answer"}
+{"id": "two-sentences", "input": "the deploy finished it took about ten minutes", "expected": "The deploy finished. It took about ten minutes."}

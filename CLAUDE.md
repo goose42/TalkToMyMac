@@ -20,14 +20,21 @@ macOS menu-bar dictation app (Swift 6, SwiftPM, macOS 26+). Speech is transcribe
 
 ## Layout
 
-- `Sources/TalkToMyMacCore` — pure logic, no UI dependencies. **The only target with tests**
+- `Sources/TalkToMyMacCore` — pure logic, no UI dependencies. **The app's only tested target**
   (`Tests/TalkToMyMacCoreTests`), so put testable logic here and keep the app target thin.
 - `Sources/TalkToMyMac` — AppKit/SwiftUI app executable (views, audio, hotkeys, providers).
+- `Sources/TalkToMyMacCore/Prompts` — built-in prompts as Markdown, compiled into `PromptLibrary`
+  by `Plugins/PromptCompilerPlugin` (codegen in `Sources/PromptCodegen`, tested in
+  `Tests/PromptCodegenTests`). Edit the `.md`, not Swift; see its README.
+- `evals/` — standalone SwiftPM package that scores prompts against JSONL cases with the on-device
+  model and the user's dictionary. Not part of the app build; see `evals/README.md`.
 - `docs/pr` — one markdown file per PR; the repo's agent-readable history (see `docs/pr/README.md`).
 
 ## Commands
 
 - `make test` — run unit tests
+- `make eval SUITE=coding ARGS="--judge"` / `make eval-test` — run a prompt eval / the eval
+  harness's own tests
 - `make build` — build and sign `build/TalkToMyMac.app`
 - `make run` / `make install` — launch / install to `/Applications` (both run `check-deps`)
 - `make setup-signing` — one-time; creates the "TalkToMyMac Dev" identity so Microphone and

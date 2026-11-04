@@ -8,6 +8,8 @@ let package = Package(
         // Exposed so the standalone eval harness in `evals/` can use the app's prompts,
         // dictionary cleanup and generation settings.
         .library(name: "TalkToMyMacCore", targets: ["TalkToMyMacCore"]),
+        // So the evals read draft prompt files exactly the way the build compiles them.
+        .library(name: "PromptCodegen", targets: ["PromptCodegen"]),
     ],
     dependencies: [
         // Runs the Parakeet speech-to-text Core ML model on-device.

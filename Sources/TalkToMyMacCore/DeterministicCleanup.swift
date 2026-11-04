@@ -28,4 +28,17 @@ public enum DeterministicCleanup {
     public static func runs(on text: String, language: String?) -> Bool {
         TranscriptCleaner.isEnglishIgnoringFillers(text, language: language)
     }
+
+    /// The pipeline's cleaning step. The dictionary's written forms are always swapped in;
+    /// full cleanup also runs when `fullCleanup` is on and `runs(on:language:)` says the text
+    /// qualifies. Returns nil when only the dictionary ran and changed nothing, so the caller
+    /// keeps the raw text. Used by the app's `CleanupRouter` and by the evals.
+    public static func clean(_ text: String, dictionary: [DictionaryEntry],
+                             fullCleanup: Bool, language: String?) -> String? {
+        if fullCleanup, runs(on: text, language: language) {
+            return apply(text, dictionary: dictionary)
+        }
+        let replaced = applyDictionary(text, dictionary: dictionary)
+        return replaced == text ? nil : replaced
+    }
 }
