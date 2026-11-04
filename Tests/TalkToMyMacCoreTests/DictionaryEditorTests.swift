@@ -91,9 +91,9 @@ final class DictionaryEditorTests: XCTestCase {
         let item = try XCTUnwrap(editor.item(id))
         XCTAssertEqual(item.status, .ready)
         XCTAssertEqual(item.entry, DictionaryEntry(
-            written: "OTel", type: .acronym, soundsLike: ["hotel", "oh tel"],
+            written: "OTel", type: .acronym,
             context: "appears next to words like collector, tracing"
-        ))
+        ), "The model's guessed sound-alikes are not used; heard-as forms come from recordings")
         XCTAssertEqual(saved.last, [item.entry])
     }
 
@@ -114,17 +114,27 @@ final class DictionaryEditorTests: XCTestCase {
         let editor = makeEditor(generator: generator)
         let id = try XCTUnwrap(editor.add("REST"))
 
-        generator.release(DictionaryEntry(
-            written: "REST", type: .acronym,
-            soundsLike: [" rest ", "REST", "", "Rest", "rest", "wrest", "r e s t", "ressed", "rust", "roost"],
-            context: "   "
-        ))
+        generator.release(DictionaryEntry(written: "ignored", type: .acronym, soundsLike: ["wrest", "rust"], context: "   "))
         await editor.generationTasks[id]?.value
 
         let entry = try XCTUnwrap(editor.item(id)?.entry)
-        XCTAssertEqual(entry.soundsLike, ["rest", "wrest", "r e s t", "ressed", "rust"],
-                       "Trimmed, empties and the exact written form dropped, de-duplicated ignoring case, capped at 5")
+        XCTAssertEqual(entry.written, "REST", "The user's spelling is kept")
+        XCTAssertEqual(entry.soundsLike, [], "A suggested soundsLike is ignored")
         XCTAssertNil(entry.context, "A blank context becomes nil")
+    }
+
+    func testGenerationKeepsRecordedSoundsLike() async throws {
+        let generator = GatedEntryGenerator()
+        let editor = makeEditor(entries: [DictionaryEntry(written: "OTel", type: .noun, soundsLike: ["hotel"])],
+                                generator: generator)
+        let id = try XCTUnwrap(editor.items.first?.id)
+        editor.regenerate(id)
+
+        generator.release(otelSuggestion)
+        await editor.generationTasks[id]?.value
+
+        XCTAssertEqual(editor.item(id)?.entry.soundsLike, ["hotel"])
+        XCTAssertEqual(editor.item(id)?.entry.type, .acronym, "Other fields still come from the suggestion")
     }
 
     // MARK: Editing
@@ -326,16 +336,21 @@ final class DictionaryEditorTests: XCTestCase {
         XCTAssertEqual(editor.addSoundsLike(["hotel"], to: UUID()), [])
     }
 
-    func testAddSoundsLikeOverridesPendingSuggestion() async throws {
+    func testAddSoundsLikeDoesNotCancelPendingSuggestion() async throws {
         let generator = GatedEntryGenerator()
         let editor = makeEditor(generator: generator)
         let id = try XCTUnwrap(editor.add("OTel"))
 
         editor.addSoundsLike(["motel"], to: id)
-        XCTAssertEqual(editor.item(id)?.status, .ready)
+        XCTAssertEqual(editor.item(id)?.status, .generating, "Recording while the model works doesn't cancel it")
         generator.release(otelSuggestion)
         await editor.generationTasks[id]?.value
-        XCTAssertEqual(editor.item(id)?.entry.soundsLike, ["motel"])
+
+        let item = try XCTUnwrap(editor.item(id))
+        XCTAssertEqual(item.status, .ready)
+        XCTAssertEqual(item.entry.soundsLike, ["motel"])
+        XCTAssertEqual(item.entry.type, .acronym)
+        XCTAssertEqual(item.entry.context, "appears next to words like collector, tracing")
     }
 }
 

@@ -33,8 +33,6 @@ public final class DictionaryEditor {
     @ObservationIgnored private let generator: DictionaryEntryGenerating?
     @ObservationIgnored private let onChange: ([DictionaryEntry]) -> Void
 
-    public static let maxSoundsLike = 5
-
     public init(entries: [DictionaryEntry], generator: DictionaryEntryGenerating?,
                 onChange: @escaping ([DictionaryEntry]) -> Void) {
         self.items = entries.map { Item(id: UUID(), entry: $0, status: .ready) }
@@ -76,20 +74,21 @@ public final class DictionaryEditor {
     }
 
     /// Appends heard-as forms the entry doesn't have yet (ignoring case, and skipping the
-    /// written form), e.g. ones learned from a recording. Counts as an edit, so it wins over
-    /// a pending suggestion. Returns the forms actually added; saves only if there were any.
+    /// written form), e.g. ones learned from a recording. A pending suggestion is left alone:
+    /// it never sets heard-as forms, so it can't clash. Returns the forms actually added;
+    /// saves only if there were any.
     @discardableResult
     public func addSoundsLike(_ forms: [String], to id: UUID) -> [String] {
         guard let index = index(of: id) else { return [] }
-        var entry = items[index].entry
+        let entry = items[index].entry
         var seen = Set(([entry.written] + entry.soundsLike).map { $0.lowercased() })
         let added = forms
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty && seen.insert($0.lowercased()).inserted }
         guard !added.isEmpty else { return [] }
 
-        entry.soundsLike += added
-        update(id, to: entry)
+        items[index].entry.soundsLike += added
+        save()
         return added
     }
 
@@ -184,7 +183,8 @@ public final class DictionaryEditor {
             items[index].status = .generationFailed
             return
         }
-        items[index].entry = Self.sanitized(suggestion, written: items[index].entry.written)
+        let current = items[index].entry
+        items[index].entry = Self.sanitized(suggestion, written: current.written, soundsLike: current.soundsLike)
         items[index].status = .ready
         save()
     }
@@ -193,18 +193,14 @@ public final class DictionaryEditor {
         pendingRequests[id] = nil
     }
 
-    /// Keeps the user's spelling and tidies the model's lists: trimmed, no empties, no exact
-    /// copy of the written form, unique ignoring case, at most `maxSoundsLike`.
-    static func sanitized(_ suggestion: DictionaryEntry, written: String) -> DictionaryEntry {
-        var seen = Set<String>()
-        let soundsLike = suggestion.soundsLike
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty && $0 != written && seen.insert($0.lowercased()).inserted }
+    /// Keeps the user's spelling and heard-as forms (those come only from the user and their
+    /// recordings, never from the model) and tidies the model's context.
+    static func sanitized(_ suggestion: DictionaryEntry, written: String, soundsLike: [String]) -> DictionaryEntry {
         let context = suggestion.context?.trimmingCharacters(in: .whitespacesAndNewlines)
 
         var entry = suggestion
         entry.written = written
-        entry.soundsLike = Array(soundsLike.prefix(maxSoundsLike))
+        entry.soundsLike = soundsLike
         entry.context = (context?.isEmpty ?? true) ? nil : context
         return entry
     }
