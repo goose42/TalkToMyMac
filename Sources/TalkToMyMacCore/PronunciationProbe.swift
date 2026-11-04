@@ -49,6 +49,7 @@ public struct PronunciationProbe {
     /// not `written` and not already in `existing` (ignoring case), most frequent first.
     /// `progress` gets (done, total) after each transcription.
     public func run(word: Take, sentence: Take?, written: String, existing: [String],
+                    carrier: (prefix: String, suffix: String) = (carrierPrefix, carrierSuffix),
                     progress: (@Sendable (Int, Int) -> Void)? = nil) async -> [Candidate] {
         var jobs: [(samples: [Float], sampleRate: Double, isSentence: Bool)] = []
         for (take, isSentence) in [(word, false), (sentence, true)] {
@@ -69,7 +70,8 @@ public struct PronunciationProbe {
                                                                         sampleRate: job.sampleRate)
             var seenInVariant = Set<String>()
             for alternative in alternatives {
-                let raw = job.isSentence ? Self.extractSlot(from: alternative) : alternative
+                let raw = job.isSentence ? Self.extractSlot(from: alternative, prefix: carrier.prefix, suffix: carrier.suffix)
+                    : alternative
                 guard let raw, let text = Self.normalize(raw),
                       text.split(separator: " ").count <= Self.maxWords else { continue }
                 let key = text.lowercased()
@@ -92,12 +94,13 @@ public struct PronunciationProbe {
 
     /// The words between the carrier's prefix and suffix, or nil if the transcript doesn't
     /// follow the carrier (then it can't be told which words are the term).
-    static func extractSlot(from transcript: String) -> String? {
+    static func extractSlot(from transcript: String, prefix prefixText: String = PronunciationProbe.carrierPrefix,
+                            suffix suffixText: String = PronunciationProbe.carrierSuffix) -> String? {
         let words = transcript.split(whereSeparator: \.isWhitespace).map(String.init)
         let keys = words.map(comparisonKey)
-        let suffix = carrierSuffix.split(separator: " ").map { comparisonKey(String($0)) }
+        let suffix = suffixText.split(separator: " ").map { comparisonKey(String($0)) }
 
-        let prefixes = [carrierPrefix, "I am working with"].map {
+        let prefixes = [prefixText, "I am working with"].map {
             $0.split(separator: " ").map { comparisonKey(String($0)) }
         }
         guard let prefix = prefixes.first(where: { keys.starts(with: $0) }),

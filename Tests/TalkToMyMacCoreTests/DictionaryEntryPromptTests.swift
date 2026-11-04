@@ -13,10 +13,8 @@ final class DictionaryEntryPromptTests: XCTestCase {
         }
     }
 
-    func testInstructionsForbidTheTermAndFragments() {
-        let text = DictionaryEntryPrompt.instructions
-        XCTAssertTrue(text.contains("Never include the term itself"))
-        XCTAssertTrue(text.contains("whole term"))
+    func testInstructionsForbidTheTermInNeighbourWords() {
+        XCTAssertTrue(DictionaryEntryPrompt.instructions.contains("Never include the term itself"))
     }
 
     // MARK: Building an entry from the model's answer
@@ -25,50 +23,54 @@ final class DictionaryEntryPromptTests: XCTestCase {
     /// describes where the term appears, built from neighbouring words rather than prose.
     func testContextBuiltFromNeighbourWords() {
         let entry = DictionaryEntryPrompt.entry(
-            written: "OTel", type: .acronym, soundsLike: ["hotel"],
+            written: "OTel", type: .acronym,
             neighborWords: [" collector ", "tracing", "", "spans"], formatAsCode: false, inflect: true)
         XCTAssertEqual(entry.context, "appears next to words like collector, tracing, spans")
     }
 
     func testNeighbourWordsMatchingTheTermAreDropped() {
         let entry = DictionaryEntryPrompt.entry(
-            written: "OTel", type: .acronym, soundsLike: [],
+            written: "OTel", type: .acronym,
             neighborWords: ["otel", "OTel collector", "tracing"], formatAsCode: false, inflect: true)
         XCTAssertEqual(entry.context, "appears next to words like tracing")
     }
 
     func testNoUsableNeighbourWordsMeansNoContext() {
         let entry = DictionaryEntryPrompt.entry(
-            written: "OTel", type: .acronym, soundsLike: [], neighborWords: [" ", "OTel"],
+            written: "OTel", type: .acronym, neighborWords: [" ", "OTel"],
             formatAsCode: false, inflect: true)
         XCTAssertNil(entry.context)
     }
 
     func testFormatAsCodeOnlyForIdentifiers() {
         XCTAssertTrue(DictionaryEntryPrompt.entry(
-            written: "useEffect", type: .identifier, soundsLike: [], neighborWords: [],
+            written: "useEffect", type: .identifier, neighborWords: [],
             formatAsCode: true, inflect: true).formatAsCode)
         XCTAssertFalse(DictionaryEntryPrompt.entry(
-            written: "OTel", type: .acronym, soundsLike: [], neighborWords: [],
+            written: "OTel", type: .acronym, neighborWords: [],
             formatAsCode: true, inflect: true).formatAsCode)
     }
 
     func testInflectCanOnlyBeDisabledForVerbs() {
         XCTAssertFalse(DictionaryEntryPrompt.entry(
-            written: "dedupe", type: .verb, soundsLike: [], neighborWords: [],
+            written: "dedupe", type: .verb, neighborWords: [],
             formatAsCode: false, inflect: false).inflect)
         XCTAssertTrue(DictionaryEntryPrompt.entry(
-            written: "OTel", type: .acronym, soundsLike: [], neighborWords: [],
+            written: "OTel", type: .acronym, neighborWords: [],
             formatAsCode: false, inflect: false).inflect)
     }
 
-    func testEntryKeepsWrittenTypeAndSoundsLike() {
+    func testEntryKeepsWrittenAndType() {
         let entry = DictionaryEntryPrompt.entry(
-            written: "useEffect", type: .identifier, soundsLike: ["use effect"], neighborWords: [],
+            written: "useEffect", type: .identifier, neighborWords: [],
             formatAsCode: true, inflect: true)
         XCTAssertEqual(entry.written, "useEffect")
         XCTAssertEqual(entry.type, .identifier)
-        XCTAssertEqual(entry.soundsLike, ["use effect"])
+        XCTAssertEqual(entry.soundsLike, [])
+    }
+
+    func testInstructionsDoNotAskTheModelToGuessSoundAlikes() {
+        XCTAssertFalse(DictionaryEntryPrompt.instructions.contains("soundsLike"))
     }
 
     func testListParsingSplitsOnCommasAndTrims() {

@@ -51,10 +51,6 @@ private struct GeneratedEntry {
     @Guide(description: "What kind of term this is")
     var type: GeneratedEntryType
 
-    @Guide(description: "Ways a speech-to-text model might write the whole term when spoken; each covers the whole term",
-           .count(2...4))
-    var soundsLike: [String]
-
     @Guide(description: "Ordinary words that often appear in the same sentence as the term, never the term itself",
            .count(3...4))
     var neighborWords: [String]
@@ -66,7 +62,7 @@ private struct GeneratedEntry {
     var inflect: Bool
 
     func dictionaryEntry(written: String) -> DictionaryEntry {
-        DictionaryEntryPrompt.entry(written: written, type: type.entryType, soundsLike: soundsLike,
+        DictionaryEntryPrompt.entry(written: written, type: type.entryType,
                                     neighborWords: neighborWords, formatAsCode: formatAsCode, inflect: inflect)
     }
 }

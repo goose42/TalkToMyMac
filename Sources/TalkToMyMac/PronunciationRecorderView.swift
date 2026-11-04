@@ -27,7 +27,18 @@ struct PronunciationRecorderView: View {
     @State private var level: Float = 0
     @State private var wordTake: PronunciationProbe.Take?
 
+    @State private var sentenceDraft = ""
+
     private var written: String { editor.item(id)?.entry.written ?? "" }
+
+    private var sentence: String {
+        PronunciationSentence.resolve(custom: sentenceDraft, default: PronunciationSentence.defaultSentence(for: written))
+    }
+
+    /// The word and what surrounds it in the sentence; nil if an edit dropped the word.
+    private var carrier: (prefix: String, suffix: String)? {
+        PronunciationSentence.carrier(in: sentence, around: written)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -63,8 +74,21 @@ struct PronunciationRecorderView: View {
         case .word:
             prompt(step: 1, Text("Say “\(written)” on its own, the way you'd say it while dictating."))
         case .sentence:
-            prompt(step: 2, Text("Now say: “\(PronunciationProbe.carrierPrefix) **\(written)** "
-                                 + "\(PronunciationProbe.carrierSuffix).”"))
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Step 2 of 2").font(.caption).foregroundStyle(.secondary)
+                Text("Now say this sentence, or edit it to one you'd really say:")
+                TextField("Sentence", text: $sentenceDraft, axis: .vertical)
+                    .labelsHidden()
+                    .lineLimit(1...3)
+                    .disabled(isRecording)
+                if carrier == nil {
+                    Text("The sentence must include “\(written)”.")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+                recordControls
+                    .disabled(carrier == nil && !isRecording)
+            }
         case .analyzing(let done, let total):
             VStack(alignment: .leading, spacing: 8) {
                 Text("Trying \(total) voice variations…")
@@ -95,14 +119,18 @@ struct PronunciationRecorderView: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Step \(number) of 2").font(.caption).foregroundStyle(.secondary)
             instruction
-            HStack(spacing: 12) {
-                Button(isRecording ? "Stop" : "Record", systemImage: isRecording ? "stop.fill" : "mic.fill") {
-                    isRecording ? finishTake() : startCapture()
-                }
-                .keyboardShortcut(.defaultAction)
-                ProgressView(value: Double(isRecording ? level : 0))
-                    .frame(width: 120)
+            recordControls
+        }
+    }
+
+    private var recordControls: some View {
+        HStack(spacing: 12) {
+            Button(isRecording ? "Stop" : "Record", systemImage: isRecording ? "stop.fill" : "mic.fill") {
+                isRecording ? finishTake() : startCapture()
             }
+            .keyboardShortcut(.defaultAction)
+            ProgressView(value: Double(isRecording ? level : 0))
+                .frame(width: 120)
         }
     }
 
@@ -133,6 +161,7 @@ struct PronunciationRecorderView: View {
             }
             if step == .word {
                 wordTake = take
+                sentenceDraft = PronunciationSentence.defaultSentence(for: written)
                 step = .sentence
             } else if let wordTake {
                 analyze(word: wordTake, sentence: take)
@@ -165,7 +194,9 @@ struct PronunciationRecorderView: View {
         Task {
             let probe = PronunciationProbe(transcriber: transcriber, pitchShifter: TimePitchShifter())
             let candidates = await probe.run(word: word, sentence: sentence, written: entry.written,
-                                             existing: entry.soundsLike) { done, total in
+                                             existing: entry.soundsLike,
+                                             carrier: carrier ?? (PronunciationProbe.carrierPrefix,
+                                                                  PronunciationProbe.carrierSuffix)) { done, total in
                 Task { @MainActor in
                     // A late update mustn't overwrite the result.
                     if case .analyzing = step { step = .analyzing(done: done, total: total) }
