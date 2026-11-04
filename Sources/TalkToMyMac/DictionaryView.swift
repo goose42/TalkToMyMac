@@ -13,6 +13,8 @@ struct DictionaryView: View {
     let transcriber: TranscriptionRouter
     @State private var newWord = ""
     @State private var selection: UUID?
+    /// Set when a word was just added, so its detail page opens the recorder sheet.
+    @State private var opensRecorderOnAppear = false
     /// Fuzzy filter over the word list; kept while a word's details are open.
     @State private var filter = ""
     /// Outcome of the last import or export, shown under the Storage buttons.
@@ -20,8 +22,12 @@ struct DictionaryView: View {
 
     var body: some View {
         if let selection, editor.item(selection) != nil {
-            EntryDetailView(editor: editor, transcriber: transcriber, settings: settings, id: selection) { self.selection = nil }
-                .id(selection)
+            EntryDetailView(editor: editor, transcriber: transcriber, settings: settings, id: selection,
+                            opensRecorderOnAppear: opensRecorderOnAppear) {
+                self.selection = nil
+                opensRecorderOnAppear = false
+            }
+            .id(selection)
         } else {
             listPage
         }
@@ -254,9 +260,12 @@ struct DictionaryView: View {
         }
     }
 
+    /// Adds the word and opens its detail page with the pronunciation recorder sheet already up.
     private func addWord() {
-        guard editor.add(newWord) != nil else { return }
+        guard let id = editor.add(newWord) else { return }
         newWord = ""
+        opensRecorderOnAppear = true
+        selection = id
     }
 }
 
@@ -271,6 +280,7 @@ private struct EntryDetailView: View {
     let transcriber: TranscriptionRouter
     let settings: FormattingSettings
     let id: UUID
+    var opensRecorderOnAppear = false
     let onBack: () -> Void
 
     @State private var written = ""
@@ -299,7 +309,12 @@ private struct EntryDetailView: View {
             }
             .frame(minWidth: 440, maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .onExitCommand(perform: onBack)
-            .onAppear { loadDrafts(from: item.entry) }
+            .onAppear {
+                loadDrafts(from: item.entry)
+                guard opensRecorderOnAppear, transcriber.isReady else { return }
+                // Present on the next turn of the run loop; a sheet set during the page swap can be dropped.
+                Task { @MainActor in isRecordingPronunciation = true }
+            }
             .sheet(isPresented: $isRecordingPronunciation, onDismiss: {
                 if let entry = editor.item(id)?.entry { loadDrafts(from: entry) }
             }) {
